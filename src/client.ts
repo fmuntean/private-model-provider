@@ -63,8 +63,9 @@ interface ToolCallState {
   handleSSEError(error: Error): void;
 }
 
+
 /**
- * Parsed SSE chunk data
+ * Parsed SSE chunk data, now including optional usage object for final response.
  */
 interface ParsedChunk {
   delta?: {
@@ -96,6 +97,11 @@ interface ParsedChunk {
   };
   finishReason?: string;
   id?: string;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  }
 }
 
 /**
@@ -339,6 +345,7 @@ export class GatewayClient {
     const delta = parsed.delta!;
     const finishedToolCalls: StreamingToolCall[] = [];
 
+    console.log("CONTENT DELTA:"+parsed.delta?.content);
     // Handle streamed tool_calls
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
@@ -415,6 +422,7 @@ export class GatewayClient {
         message: parsed.choices?.[0]?.message,
         finishReason: parsed.choices?.[0]?.finish_reason,
         id: parsed.id,
+        usage: parsed.usage
       };
     } catch {
       console.error('Failed to parse SSE chunk:', data);
@@ -423,12 +431,12 @@ export class GatewayClient {
   }
 
   /**
-   * Process a single SSE line and return yield data if applicable
+   * Process a single SSE line and return yield data if applicable, including usage.
    */
   private processSSELine(
     line: string,
     state: ToolCallState
-  ): { content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] } | null {
+  ): { content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: ParsedChunk['usage'] } | null {
     const trimmed = line.trim();
 
     if (trimmed === '' || trimmed === 'data: [DONE]') {
@@ -443,17 +451,21 @@ export class GatewayClient {
     const parsed = this.parseSSEData(data);
     if (!parsed) { return null; }
 
+    let result: { content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: ParsedChunk['usage'] };
+
     if (parsed.delta) {
-      const { content, reasoning_content, finishedToolCalls } = this.processDeltaFormat(parsed, state);
-      return { content, reasoning_content, tool_calls: [], finished_tool_calls: finishedToolCalls };
+      const { content, reasoning_content: rc, finishedToolCalls } = this.processDeltaFormat(parsed, state);
+      result = { content, reasoning_content: rc, tool_calls: [], finished_tool_calls: finishedToolCalls, usage: parsed.usage };
+    } else if (parsed.message) {
+      const { content, reasoning_content: rc, finishedToolCalls } = this.processMessageFormat(parsed, state);
+      result = { content, reasoning_content: rc, tool_calls: [], finished_tool_calls: finishedToolCalls, usage: parsed.usage };
+    } else if (parsed.usage){
+      result = { content:'', reasoning_content: '', tool_calls: [], finished_tool_calls: [], usage: parsed.usage };
+    }else {
+      return null;
     }
 
-    if (parsed.message) {
-      const { content, reasoning_content, finishedToolCalls } = this.processMessageFormat(parsed, state);
-      return { content, reasoning_content, tool_calls: [], finished_tool_calls: finishedToolCalls };
-    }
-
-    return null;
+    return result;
   }
 
   /**
@@ -493,7 +505,7 @@ export class GatewayClient {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...request, stream: true }),
+        body: JSON.stringify({ ...request, stream: true, stream_options: {include_usage: true } }),
       }, 'Chat completion');
 
       if (!response.ok) {
@@ -546,8 +558,15 @@ export class GatewayClient {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
+          console.log(line);
           const result = this.processSSELine(line, state);
-          if (result) { yield result; }
+          if (result) { 
+            yield result; 
+            // Capture and store the usage object from the current chunk's result for final yield check
+            if (result.usage) {
+              (state as any).lastUsage = result.usage;
+            }
+          }
         }
       }
 
@@ -565,6 +584,14 @@ export class GatewayClient {
       if (remaining.length > 0) {
         yield { content: '', tool_calls: [], finished_tool_calls: remaining };
       }
+      
+      // CRITICAL FIX: Yield the final usage object if it was captured during streaming, 
+      // ensuring the consumer receives the authoritative token count even if no text is streamed last.
+      if (state['lastUsage']) {
+        yield { content: '', tool_calls: [], finished_tool_calls: [], usage: state['lastUsage'] as ParsedChunk['usage'] };
+        (state as any).lastUsage = undefined; // Clear flag after yielding
+      }
+
     } catch (error) {
       if (error instanceof GatewayError) {
         throw error;

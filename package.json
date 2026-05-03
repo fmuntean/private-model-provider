@@ -1,15 +1,15 @@
 {
   "name": "local-model-provider",
-  "displayName": "Local Model Provider",
+  "displayName": "MFD: Local Model Provider",
   "description": "VS Code extension to connect to local LLM inference servers (Ollama, llama.cpp, LocalAI, LM Studio, vLLM) via OpenAI API compatible endpoints.",
   "version": "1.1.2",
-  "publisher": "krevas",
+  "publisher": "mfd",
   "icon": "assets/local-model-provider.png",
   "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/krevas/local-model-provider.git"
+    "url": "https://github.com/fmuntean/local-model-provider.git"
   },
   "engines": {
     "vscode": "^1.100.0"
@@ -113,7 +113,10 @@
                 "description": "Server URL"
               }
             },
-            "required": ["name", "url"]
+            "required": [
+              "name",
+              "url"
+            ]
           },
           "description": "Saved server presets for quick switching",
           "order": 2
@@ -186,6 +189,12 @@
           "description": "Presence penalty to encourage talking about new topics.",
           "order": 11
         },
+        "local.model.provider.systemPromptOverride": {
+          "type": "string",
+          "default": "",
+          "description": "Override the system prompt sent to the LLM. If empty, the default prompt is used.",
+          "order": 13
+        },
         "local.model.provider.maxRetries": {
           "type": "number",
           "default": 3,
@@ -236,9 +245,10 @@
     "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
-    "@vscode/vsce": "^3.7.1",
+    "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.27.2",
     "eslint": "^9.39.1",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vsce": "^1.2.0"
   }
 }

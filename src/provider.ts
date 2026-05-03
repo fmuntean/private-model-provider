@@ -3,6 +3,10 @@ import { GatewayClient } from './client';
 import { GatewayConfig, OpenAIChatCompletionRequest } from './types';
 import { SecretManager } from './secrets';
 import { StatisticsManager } from './statistics';
+// Added for logging chat history
+import * as fs from 'fs';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
@@ -60,6 +64,47 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       })
     );
+  }
+
+  /**
+   * Ensure the daily log folder exists: /ai-logs/YYYY-MM-DD
+   */
+  private ensureLogFolder(): string {
+    // Use the workspace root as the base for logs, falling back to extension path if unavailable
+    let workspaceRoot = '';
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+      workspaceRoot = folders[0].uri.fsPath;
+    } else {
+      workspaceRoot = this.context.extensionPath;
+    }
+    const base = path.join(workspaceRoot, 'ai-logs');
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const folder = path.join(base, today);
+    try {
+      fs.mkdirSync(folder, { recursive: true });
+    } catch (e) {
+      this.log('error', `Failed to create log folder ${folder}: ${e}`);
+    }
+    return folder;
+  }
+
+  /**
+   * Append a JSONL line to the appropriate file for the given chatId.
+   */
+  private writeLogEntry(chatId: string, entry: Record<string, unknown>): void {
+    const folder = this.ensureLogFolder();
+    const now = new Date();
+    const timestamp = now.toISOString()
+    const hhmm = now.getHours().toString().padStart(2, '0') + now.getMinutes().toString().padStart(2, '0');
+    const fileName = `${hhmm}-${chatId}.jsonl`;
+    const filePath = path.join(folder, fileName);
+    const line = JSON.stringify({ timestamp, chatId, ...entry });
+    try {
+      fs.appendFileSync(filePath, line + '\n');
+    } catch (e) {
+      this.log('error', `Failed to write log entry to ${filePath}: ${e}`);
+    }
   }
 
   /**
@@ -496,6 +541,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     let totalContent = '';
     let totalToolCalls = 0;
 
+    // Variable to hold final usage object from client stream
+    let usage: any = undefined;
     for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
       if (token.isCancellationRequested) {
         break;
@@ -503,12 +550,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       // Report text content immediately
       if (chunk.content) {
+        this.outputChannel.appendLine("CHUNK: "+chunk.content);
         totalContent += chunk.content;
         progress.report(new vscode.LanguageModelTextPart(chunk.content));
       }
 
+      if (chunk.reasoning_content){
+        this.outputChannel.appendLine("THINK: "+chunk.content);
+        this.log('info','THINK: ${chunk.reasoning_content}');
+        progress.report(new vscode.MarkdownString(chunk.reasoning_content));
+      }
+
       // Process finished tool calls (fully accumulated by client)
-      if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
+        // Capture usage if present in this chunk
+        if (chunk.usage) {
+          usage = chunk.usage;
+        }
+        if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
         for (const toolCall of chunk.finished_tool_calls) {
           totalToolCalls++;
           this.outputChannel.appendLine(`Tool call received: id=${toolCall.id}, name=${toolCall.name}`);
@@ -533,6 +591,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+
+    // --- START OF NEW USAGE-AWARE STATS CALCULATION ---
+    // The client layer now returns the final usage object upon successful stream completion.
+    // We must pass this to the provider's stats manager for accurate accounting.
+    if ( usage && this.statsManager) {
+      this.outputChannel.appendLine(`[STATS] Usage data received: Total=${usage.total_tokens}, Prompt=${usage.prompt_tokens}, Completion=${usage.completion_tokens}`);
+      // Assuming a method exists or needs to be called here to finalize stats with usage object
+      await this.statsManager.recordChatUsage(usage); 
+    } else {
+      this.outputChannel.appendLine(`[STATS] Warning: Could not retrieve final usage data for statistics recording.`);
+    }
+    // --- END OF NEW USAGE-AWARE STATS CALCULATION ---
   }
 
   /**
@@ -824,6 +894,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // Continue; errors will be handled by request path
     }
     this.log('debug', `API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
+    // Generate a unique chat identifier for this request
+    const chatId = randomUUID();
+    // Log the incoming request
+    this.writeLogEntry(chatId, {
+      type: 'request',
+      model: model.id,
+      messages,
+      options,
+    });
     this.log('info', `Sending chat request to model: ${model.id}`);
     this.log('debug', `Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.log('debug', `Message count: ${messages.length}`);
@@ -832,8 +911,26 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Convert messages
     const openAIMessages: Record<string, unknown>[] = [];
-    for (const msg of messages) {
-      openAIMessages.push(...this.convertSingleMessageWithLogging(msg));
+    // If a system prompt override is configured, prepend it as the first message
+    const systemPrompt = vscode.workspace.getConfiguration('local.model.provider').get<string>('systemPromptOverride', '').trim();
+    if (systemPrompt) {
+      openAIMessages.push({ role: 'system', content: systemPrompt });
+      this.log('debug', 'Added system prompt override to request');
+    }
+    // If we added an override, and the first original message is a system prompt, skip it to avoid duplication
+    let startIdx = 0;
+    if (systemPrompt && messages.length > 0) {
+      const firstMsg = messages[0];
+      // VS Code may represent system messages with role 'system' (if available) or as a user message with special content.
+      // We conservatively check the role via the mapRole conversion later; here we inspect the raw role if present.
+      // Since LanguageModelChatMessageRole does not expose a System enum, we check the string value directly.
+      // @ts-ignore – accessing possibly undocumented property for safety.
+      if (firstMsg.role === 3) {
+        startIdx = 1;
+      }
+    }
+    for (let i = startIdx; i < messages.length; i++) {
+      openAIMessages.push(...this.convertSingleMessageWithLogging(messages[i]));
     }
     this.log('debug', `Converted to ${openAIMessages.length} OpenAI messages`);
 
@@ -938,6 +1035,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const requestStartTime = Date.now();
 
     try {
+      // Variable to hold final usage object from client stream
+      let usage: any = undefined;
       let totalContent = '';
       let totalReasoningContent = '';
       let totalToolCalls = 0;
@@ -952,8 +1051,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (typeof (vscode as any).LanguageModelThinkingPart !== 'undefined') {
             progress.report(new (vscode as any).LanguageModelThinkingPart(chunk.reasoning_content));
           } else {
-            // Fallback: wrap reasoning in <think> tags for visibility
-            progress.report(new vscode.LanguageModelTextPart(chunk.reasoning_content));
+            // Fallback: wrap reasoning in  ground tags for visibility
+            progress.report(new vscode.MarkdownString(chunk.reasoning_content));
           }
         }
 
@@ -962,6 +1061,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           progress.report(new vscode.LanguageModelTextPart(chunk.content));
         }
 
+        // Capture usage if present in this chunk
+        if ((chunk as any).usage) {
+          usage = (chunk as any).usage;
+        }
         if (chunk.finished_tool_calls?.length) {
           for (const toolCall of chunk.finished_tool_calls) {
             totalToolCalls++;
@@ -972,22 +1075,26 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalReasoningContent.length} reasoning characters, ${totalToolCalls} tool calls`);
 
-      // Record statistics
-      const responseTimeMs = Date.now() - requestStartTime;
-      const outputTokens = Math.ceil((totalContent.length + totalReasoningContent.length) / 4);
-      if (this.statsManager) {
-        this.statsManager.recordRequest({
-          modelId: model.id,
-          inputTokens: estimatedInputTokens,
-          outputTokens,
-          responseTimeMs,
-        });
+      // --- START OF NEW USAGE-AWARE STATS CALCULATION ---
+      // The client layer now returns the final usage object upon successful stream completion.
+      // We must pass this to the provider's stats manager for accurate accounting.
+      if (usage && this.statsManager) {
+        this.outputChannel.appendLine(`[STATS] Usage data received: Total=${usage.total_tokens}, Prompt=${usage.prompt_tokens}, Completion=${usage.completion_tokens}`);
+        // Assuming a method exists or needs to be called here to finalize stats with usage object
+        await this.statsManager.recordChatUsage(usage); 
+      } else {
+        this.outputChannel.appendLine(`[STATS] Warning: Could not retrieve final usage data for statistics recording.`);
       }
-      this.log('info', `Response time: ${responseTimeMs}ms, Input tokens: ${estimatedInputTokens}, Output tokens: ~${outputTokens}`);
-
-      if (totalContent.length === 0 && totalToolCalls === 0 && totalReasoningContent.length === 0) {
-        await this.handleEmptyResponse(model, inputText, openAIMessages.length, requestOptions.tools ? (requestOptions.tools as unknown[]).length : 0, token, progress);
-      }
+      // --- END OF NEW USAGE-AWARE STATS CALCULATION ---
+      // Log the full response
+      this.writeLogEntry(chatId, {
+        type: 'response',
+        model: model.id,
+        content: totalContent,
+        reasoning: totalReasoningContent,
+        toolCalls: totalToolCalls,
+        usage,
+      });
     } catch (error) {
       this.handleChatError(error);
     }

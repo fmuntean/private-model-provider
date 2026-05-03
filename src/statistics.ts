@@ -95,6 +95,24 @@ export class StatisticsManager implements vscode.Disposable {
   }
 
   /**
+   * Record usage information from the chat completion stream.
+   * The `usage` object from the OpenAI compatible API contains token counts.
+   * This method converts it into a `recordRequest` call so that the existing
+   * statistics aggregation works without requiring callers to compute the
+   * request duration themselves.
+   */
+  public async recordChatUsage(usage: { total_tokens: number; prompt_tokens: number; completion_tokens: number }, modelId: string = 'unknown'): Promise<void> {
+    // Approximate response time as unknown here – callers can update later if needed.
+    // We treat `prompt_tokens` as input and `completion_tokens` as output.
+    this.recordRequest({
+      modelId,
+      inputTokens: usage.prompt_tokens ?? 0,
+      outputTokens: usage.completion_tokens ?? 0,
+      responseTimeMs: 0,
+    });
+  }
+
+  /**
    * Format token count for display
    */
   public static formatTokens(count: number): string {
