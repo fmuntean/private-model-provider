@@ -1,0 +1,17 @@
+// Launch configuration for debugging the Local Model Provider extension
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      "preLaunchTask": "npm: esbuild",
+      "sourceMaps": true,
+      "smartStep": true,
+      "trace": true
+    }
+  ]
+}

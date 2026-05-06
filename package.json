@@ -59,6 +59,11 @@
     ],
     "commands": [
       {
+        "command": "local-model-provider.startChat",
+        "title": "Start Chat",
+        "category": "Local Model Provider"
+      },
+      {
         "command": "local-model-provider.setApiKey",
         "title": "Set API Key (Secure)",
         "category": "Local Model Provider"
@@ -89,6 +94,27 @@
         "category": "Local Model Provider"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localModelProvider",
+          "title": "Local Model",
+          "icon": "assets/local-model-provider.png",
+          "location": "secondarySideBar"
+        }
+      ]
+    },
+    "views": {
+      "localModelProvider": [
+        {
+          "id": "localModelProvider.chat",
+          "name": "Chat",
+          "type": "webview",
+          "command": "local-model-provider.startChat",
+          "icon": "assets/local-model-provider.png"
+        }
+      ]
+    },
     "configuration": {
       "title": "Local Model Provider",
       "properties": {
