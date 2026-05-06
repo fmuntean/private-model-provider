@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Model Chat</title>
+    <link href="{{styleUri}}" rel="stylesheet" />
+</head>
+<body>
+    <div id="chat-container"></div>
+    <div id="input-bar">
+        <textarea id="user-input" rows="2" placeholder="Type a message..."></textarea>
+        <button id="send-btn">Send</button>
+        <button id="stop-btn" style="display: none;">Stop</button>
+    </div>
+    <div id="model-selector">
+        <label for="model-select">Model:</label>
+        <select id="model-select">
+            <option value="">Loading models...</option>
+        </select>
+    </div>
+    <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

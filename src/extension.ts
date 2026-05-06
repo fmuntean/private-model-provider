@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { GatewayProvider } from './provider';
 import { StatusBarManager, ServerStatus, ServerPreset } from './statusBar';
 import { StatisticsManager } from './statistics';
@@ -7,7 +8,43 @@ import { StatisticsManager } from './statistics';
  * Extension activation
  */
 export function activate(context: vscode.ExtensionContext) {
-  console.log('Local Model Provider extension is now active');
+  console.log('[LMP] Local Model Provider extension is now active');
+
+
+  // Forward messages from UI to the provider
+  const sendMessageCommand = vscode.commands.registerCommand(
+    'localModelProvider.sendMessage',
+    async (text: string, model?: string) => {
+      try {
+        const response = await provider.sendMessage(text, model);
+        // Send response to sidebar webview
+        sideBar?.postMessage({
+          type: 'assistant',
+          content: response.content,
+          usage: response.usage
+        });
+      } catch (err) {
+        sideBar?.postMessage({
+          type: 'error',
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+  );
+  context.subscriptions.push(sendMessageCommand);
+
+  // Provide token stats on request
+  const getStatsCommand = vscode.commands.registerCommand(
+    'localModelProvider.getStats',
+    () => {
+      const stats = statsManager.getSessionStats();
+      sideBar?.postMessage({
+        type: 'stats',
+        stats
+      });
+    }
+  );
+  context.subscriptions.push(getStatsCommand);
 
   // Create statistics manager
   const statsManager = new StatisticsManager();
@@ -31,6 +68,203 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(disposable);
+
+  // ---------------------------------------------------------------------
+  // Register side‑bar webview view (for the secondary side bar)
+  // ---------------------------------------------------------------------
+  class ChatSideBarProvider implements vscode.WebviewViewProvider {
+    private webviewView: vscode.WebviewView | undefined;
+    private currentCancellationSource: vscode.CancellationTokenSource | undefined;
+
+    constructor(
+      private readonly extensionUri: vscode.Uri,
+      private readonly provider: GatewayProvider
+    ) {}
+
+    /** Post message to the webview */
+    public postMessage(data: any): void {
+      this.webviewView?.webview.postMessage(data);
+    }
+
+    /** Resolve the webview view when the side‑bar panel is shown */
+    public async resolveWebviewView(webviewView: vscode.WebviewView) {
+      try {
+        console.log('[LMP] Resolving side‑bar view: localModelProvider.chat');
+        // Enable scripts and allow loading of CSS/JS from the assets folder
+        webviewView.webview.options = {
+          enableScripts: true,
+          localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'src', 'ui', 'assets')]
+        };
+
+        // Build the HTML from index.html file
+        const scriptUri = webviewView.webview.asWebviewUri(
+          vscode.Uri.joinPath(this.extensionUri, 'src', 'ui', 'assets', 'main.js')
+        );
+        const styleUri = webviewView.webview.asWebviewUri(
+          vscode.Uri.joinPath(this.extensionUri, 'src', 'ui', 'assets', 'style.css')
+        );
+        const nonce = getNonce();
+        
+        // Load HTML from file
+        const htmlPath = vscode.Uri.joinPath(this.extensionUri, 'src', 'ui', 'assets', 'index.html').fsPath;
+        let html: string;
+        try {
+          html = require('fs').readFileSync(htmlPath, 'utf-8');
+        } catch (e) {
+          console.error('[LMP] Failed to read index.html:', e);
+          html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webviewView.webview.cspSource}; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="${styleUri}" rel="stylesheet">
+  <title>Local Model Chat</title>
+</head>
+<body>
+  <div id="chat-container"></div>
+  <div id="input-bar">
+    <textarea id="user-input" rows="2" placeholder="Type a message..."></textarea>
+    <button id="send-btn">Send</button>
+  </div>
+  <div id="model-selector">
+    <label for="model-select">Model:</label>
+    <select id="model-select">
+      <option value="">Loading models...</option>
+    </select>
+  </div>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+        }
+
+        // Replace placeholders
+        html = html.replace('{{cspSource}}', webviewView.webview.cspSource);
+        html = html.replace(/{{nonce}}/g, nonce);
+        html = html.replace('{{styleUri}}', styleUri.toString());
+        html = html.replace('{{scriptUri}}', scriptUri.toString());
+
+        webviewView.webview.html = html;
+        
+        // Store webview reference
+        this.webviewView = webviewView;
+        
+        // Handle messages from the webview
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+          console.log('[LMP] Sidebar received message:', message);
+          if (message.command === 'webviewReady') {
+            console.log('[LMP] Sidebar webview ready, fetching models...');
+            try {
+              const models = await this.provider.provideLanguageModelChatInformation(
+                { silent: true },
+                new vscode.CancellationTokenSource().token
+              );
+              const config = vscode.workspace.getConfiguration('local.model.provider');
+              const defaultModel = config.get<string>('defaultModel', '');
+              console.log('[LMP] Sending models to sidebar:', models.length, 'default:', defaultModel);
+              webviewView.webview.postMessage({
+                type: 'models',
+                models: models,
+                defaultModel: defaultModel
+              });
+            } catch (error) {
+              console.error('[LMP] Failed to fetch models:', error);
+            }
+          } else if (message.command === 'sendMessage') {
+            // Handle sendMessage directly - stream response back
+            try {
+              const targetModel = message.model || vscode.workspace.getConfiguration('local.model.provider').get<string>('defaultModel', '');
+              if (!targetModel) {
+                webviewView.webview.postMessage({ type: 'error', error: 'No model selected' });
+                return;
+              }
+
+              console.log('[LMP] Streaming message to model:', targetModel);
+              
+              // Create cancellation token for this request
+              this.currentCancellationSource = new vscode.CancellationTokenSource();
+              const token = this.currentCancellationSource.token;
+              
+              let fullContent = '';
+              let doneSent = false; // Track if we already sent the done message
+              
+              // Call streamMessage with correct parameter order: (text, modelId, onChunk, cancellationToken)
+              await this.provider.streamMessage(message.text, targetModel, (chunk) => {
+                if (chunk.content) {
+                  fullContent += chunk.content;
+                  webviewView.webview.postMessage({ type: 'assistant-chunk', content: chunk.content });
+                }
+                if (chunk.usage && !doneSent) {
+                  // Send usage data when available
+                  webviewView.webview.postMessage({ type: 'assistant-done', content: fullContent, usage: chunk.usage });
+                  doneSent = true;
+                  console.log('[LMP] Streaming complete, total length:', fullContent.length, 'usage:', chunk.usage);
+                  // Clear cancellation source when done
+                  this.currentCancellationSource = undefined;
+                }
+                if (chunk.cancelled) {
+                  // Request was cancelled
+                  webviewView.webview.postMessage({ type: 'request-stopped' });
+                  console.log('[LMP] Streaming cancelled');
+                  // Clear cancellation source
+                  this.currentCancellationSource = undefined;
+                }
+                // If stream is done but no usage data (some models don't send usage)
+                if (chunk.done && !chunk.usage && !chunk.cancelled && !doneSent) {
+                  webviewView.webview.postMessage({ type: 'assistant-done', content: fullContent });
+                  doneSent = true;
+                  console.log('[LMP] Streaming complete (no usage data), total length:', fullContent.length);
+                  this.currentCancellationSource = undefined;
+                }
+              }, token);
+              
+            } catch (error) {
+              console.error('[LMP] Failed to send message:', error);
+              webviewView.webview.postMessage({ 
+                type: 'error', 
+                error: error instanceof Error ? error.message : String(error) 
+              });
+              // Clear cancellation source on error
+              this.currentCancellationSource = undefined;
+            }
+          } else if (message.command === 'stopRequest') {
+            // Handle stop request - cancel the current streaming request
+            console.log('[LMP] Stopping current request, source exists:', !!this.currentCancellationSource);
+            if (this.currentCancellationSource) {
+              this.currentCancellationSource.cancel();
+              // Don't set to undefined here - let the callback handle it
+              // this.currentCancellationSource = undefined;
+              webviewView.webview.postMessage({ type: 'request-stopped' });
+            }
+          }
+        });
+        
+        console.log('[LMP] Side-bar view loaded successfully');
+      } catch (err) {
+        console.error('[LMP] Failed to resolve side-bar view', err);
+        webviewView.webview.html = `<html><body><h3>Failed to load view</h3></body></html>`;
+      }
+    }
+  }
+
+  // Register the side‑bar view provider (defined below the imports)
+  const sideBarProvider = new ChatSideBarProvider(context.extensionUri, provider);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('localModelProvider.chat', sideBarProvider)
+  );
+
+  // Store reference to sideBarProvider for sending messages
+  let sideBar: ChatSideBarProvider | undefined = sideBarProvider;
+
+  // Helper to generate a nonce for CSP (same as in ChatWebview class)
+  function getNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+      text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+  }
 
   // Get server URL for status bar
   const config = vscode.workspace.getConfiguration('local.model.provider');
@@ -477,3 +711,4 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
   console.log('Local Model Provider extension is now deactivated');
 }
+

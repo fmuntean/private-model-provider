@@ -1214,4 +1214,151 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.client.updateConfig(this.config);
     this.outputChannel.appendLine('Configuration reloaded');
   }
+
+  /**
+   * Send a simple message from the chat webview and return the response.
+   * This is a simplified interface for the webview that doesn't use streaming.
+   */
+  public async sendMessage(text: string, modelId?: string): Promise<{ content: string; usage?: any }> {
+    await this.initializationPromise;
+
+    // Use provided model or fall back to default
+    const targetModelId = modelId ||
+      vscode.workspace.getConfiguration('local.model.provider').get<string>('defaultModel', '');
+
+    if (!targetModelId) {
+      throw new Error('No model selected. Please select a model from the dropdown.');
+    }
+
+    // Build the request
+    const messages = [{ role: 'user', content: text }];
+    const requestOptions: any = {
+      model: targetModelId,
+      messages: messages,
+      max_tokens: this.config.defaultMaxOutputTokens || 2048,
+      temperature: 0.7,
+      stream: false, // We want a complete response, not streaming
+    };
+
+    // Add optional parameters if they differ from defaults
+    if (this.config.topP !== 1.0) {
+      requestOptions.top_p = this.config.topP;
+    }
+    if (this.config.frequencyPenalty !== 0) {
+      requestOptions.frequency_penalty = this.config.frequencyPenalty;
+    }
+    if (this.config.presencePenalty !== 0) {
+      requestOptions.presence_penalty = this.config.presencePenalty;
+    }
+
+    try {
+      this.log('info', `Sending message to model: ${targetModelId}`);
+      const response = await this.client.completeChat(requestOptions);
+      const content = response.choices?.[0]?.message?.content || '';
+      const usage = response.usage;
+
+      // Record usage statistics
+      if (usage && this.statsManager) {
+        await this.statsManager.recordChatUsage(usage);
+      }
+
+      return { content, usage };
+    } catch (error) {
+      this.log('error', `Failed to send message: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Stream a chat message and call the callback with each chunk.
+   * Used by the webview for streaming responses.
+   */
+  public async streamMessage(
+    text: string,
+    modelId: string | undefined,
+    onChunk: (chunk: { content?: string; done?: boolean; usage?: any; cancelled?: boolean }) => void,
+    cancellationToken?: vscode.CancellationToken
+  ): Promise<void> {
+    await this.initializationPromise;
+
+    // Use provided model or fall back to default
+    const targetModelId = modelId ||
+      vscode.workspace.getConfiguration('local.model.provider').get<string>('defaultModel', '');
+
+    if (!targetModelId) {
+      throw new Error('No model selected. Please select a model from the dropdown.');
+    }
+
+    // Build the request
+    const messages = [{ role: 'user', content: text }];
+    const requestOptions: any = {
+      model: targetModelId,
+      messages: messages,
+      max_tokens: this.config.defaultMaxOutputTokens || 2048,
+      temperature: 0.7,
+      stream: true,
+      stream_options: { include_usage: true }
+    };
+
+    // Add optional parameters if they differ from defaults
+    if (this.config.topP !== 1.0) {
+      requestOptions.top_p = this.config.topP;
+    }
+    if (this.config.frequencyPenalty !== 0) {
+      requestOptions.frequency_penalty = this.config.frequencyPenalty;
+    }
+    if (this.config.presencePenalty !== 0) {
+      requestOptions.presence_penalty = this.config.presencePenalty;
+    }
+
+    try {
+      this.log('info', `Streaming message to model: ${targetModelId}`);
+      
+      let fullContent = '';
+      let wasCancelled = false;
+      let doneSent = false;
+      
+      // Use provided cancellation token or create a dummy one
+      const token = cancellationToken || { isCancellationRequested: false, onCancelled: () => {} } as any;
+      
+      for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
+        // Check for cancellation at the start of each iteration
+        if (token.isCancellationRequested) {
+          this.log('info', 'Streaming cancelled by user (detected in loop)');
+          wasCancelled = true;
+          break;
+        }
+        
+        if (chunk.content) {
+          fullContent += chunk.content;
+          onChunk({ content: chunk.content });
+        }
+        
+        // Check if usage is included in the chunk (final chunk)
+        if (chunk.usage) {
+          onChunk({ usage: chunk.usage, done: true });
+          doneSent = true;
+        }
+      }
+      
+      // Check if cancellation was requested (might not have been detected in loop if stream ended)
+      if (token.isCancellationRequested) {
+        wasCancelled = true;
+      }
+      
+      if (wasCancelled) {
+        this.log('info', 'Calling onChunk with cancelled=true');
+        onChunk({ done: true, cancelled: true });
+      } else if (!doneSent) {
+        // Stream ended normally - send done message if not already sent with usage
+        this.log('info', 'Streaming complete, sending done message');
+        onChunk({ done: true });
+      }
+      
+      this.log('info', `Streaming complete, total length: ${fullContent.length}`);
+    } catch (error) {
+      this.log('error', `Failed to stream message: ${error}`);
+      throw error;
+    }
+  }
 }

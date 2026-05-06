@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import {
   OpenAIChatCompletionRequest,
+  OpenAIChatCompletionResponse,
   OpenAIModelsResponse,
   GatewayConfig
 } from './types';
@@ -58,6 +59,7 @@ interface ToolCallState {
   finalizedIndices: Set<number>;
   requestId: string;
   toolCallCounter: number;
+  lastUsage?: ParsedChunk['usage'];
 
   // Add error handling for SSE events
   handleSSEError(error: Error): void;
@@ -497,7 +499,7 @@ export class GatewayClient {
   public async *streamChatCompletion(
     request: OpenAIChatCompletionRequest,
     cancellationToken: vscode.CancellationToken
-  ): AsyncGenerator<{ content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[] }, void, unknown> {
+  ): AsyncGenerator<{ content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: ParsedChunk['usage'] }, void, unknown> {
     const url = `${this.config.serverUrl}/v1/chat/completions`;
     const state = this.createToolCallState();
 
@@ -530,8 +532,10 @@ export class GatewayClient {
 
       while (true) {
         if (cancellationToken.isCancellationRequested) {
+          console.log('[LLM Gateway] Cancellation requested, aborting stream');
           await reader.cancel();
-          break;
+          // Throw an error to ensure the generator ends properly
+          throw new Error('Stream cancelled by user');
         }
 
         let readResult: ReadableStreamReadResult<Uint8Array>;
@@ -558,6 +562,13 @@ export class GatewayClient {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
+          // Check for cancellation during line processing
+          if (cancellationToken.isCancellationRequested) {
+            console.log('[LLM Gateway] Cancellation requested during line processing, aborting stream');
+            await reader.cancel();
+            return; // Exit the generator entirely
+          }
+          
           console.log(line);
           const result = this.processSSELine(line, state);
           if (result) { 
@@ -597,6 +608,12 @@ export class GatewayClient {
         throw error;
       }
       if (error instanceof Error) {
+        // Check if this is a cancellation error - don't treat it as a real error
+        if (error.message === 'Stream cancelled by user') {
+          console.log('[LLM Gateway] Stream was cancelled by user');
+          return; // Exit the generator normally
+        }
+        
         const msg = error.message?.toLowerCase() || '';
         // Detect common connection-drop errors from various OpenAI-compatible servers
         // (LM Studio, Ollama, llama.cpp, etc.) that close the connection unexpectedly
@@ -661,6 +678,46 @@ export class GatewayClient {
       return response;
     } finally {
       clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Send a non-streaming chat completion request and return the full response.
+   * Used by the chat webview for simple message/response interactions.
+   */
+  public async completeChat(request: OpenAIChatCompletionRequest): Promise<OpenAIChatCompletionResponse> {
+    const url = `${this.config.serverUrl}/v1/chat/completions`;
+
+    try {
+      const response = await this.fetchWithRetry(url, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...request, stream: false }),
+      }, 'Complete chat');
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new GatewayError(
+          `Chat completion failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`,
+          response.status,
+          this.isRetryableError(null, response.status)
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof GatewayError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw new GatewayError(
+          `Failed to complete chat: ${error.message}`,
+          undefined,
+          this.isRetryableError(error),
+          error
+        );
+      }
+      throw error;
     }
   }
 }
