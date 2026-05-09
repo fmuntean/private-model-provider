@@ -116,6 +116,28 @@ A VS Code extension that connects your editor to self‑hosted or local LLMs via
 
 ![Server preset](assets/5_server_preset.PNG)
 
+## 🏷️ Session Title Generation
+
+The extension can automatically generate concise session titles based on the first user message. This helps you identify and organize your chat sessions more easily.
+
+### Configuration
+- Set `local.model.provider.smallModel` to use a smaller, faster model for title generation
+- If `smallModel` is not configured, the `defaultModel` will be used as fallback
+- The title is generated as a ~10 word summary of the first message
+
+### Custom Summary Prompt
+You can customize the title generation prompt by creating a `.llm/session.summary.md` file in your workspace root:
+
+```markdown
+Summarize the following message in 10 words or less, focusing on the main topic:
+
+{{message}}
+```
+
+The `{{message}}` placeholder will be replaced with the first user message in the session.
+
+If no custom template is found, a default prompt will be used.
+
 ## ⚙️ Configuration
 
 All settings are under the `local.model.provider.*` namespace.
@@ -124,6 +146,7 @@ All settings are under the `local.model.provider.*` namespace.
 - `serverUrl` (string): base URL, e.g. `http://localhost:8000`
 - `serverPresets` (array): saved server configurations for quick switching
 - `defaultModel` (string): default model ID to use (leave empty for auto-select)
+- `smallModel` (string): small model for summarization and title generation (leave empty to use default model)
 - `requestTimeout` (number, ms): default 60000
 
 ### Token & Context Settings

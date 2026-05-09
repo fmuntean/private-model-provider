@@ -8,18 +8,38 @@
     <link href="{{styleUri}}" rel="stylesheet" />
 </head>
 <body>
-    <div id="chat-container"></div>
-    <div id="input-bar">
-        <textarea id="user-input" rows="2" placeholder="Type a message..."></textarea>
-        <button id="send-btn">Send</button>
-        <button id="stop-btn" style="display: none;">Stop</button>
+    <!-- Main grid container -->
+    <div id="main-content">
+        <!-- Top area: session list will be loaded here -->
+        <div id="top-area">
+            <h3>Sessions</h3>
+            <p>Loading sessions...</p>
+        </div>
+
+        <!-- Bottom area: input controls (always visible) -->
+        <div id="input-controls">
+            <div id="input-bar">
+                <textarea id="user-input" rows="2" placeholder="Type a message..."></textarea>
+                <button id="stop-btn" class="icon-btn" style="display: none;" title="Stop generating">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <rect x="3" y="3" width="10" height="10" rx="1"></rect>
+                    </svg>
+                </button>
+                <button id="send-btn" class="icon-btn" title="Send message">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M1.5 1.5l13 6.5-13 6.5V9.5L7 8 1.5 6.5V1.5z"></path>
+                    </svg>
+                </button>
+            </div>
+            <div id="model-selector-inline">
+                <label for="model-select">Model:</label>
+                <select id="model-select">
+                    <option value="">Loading models...</option>
+                </select>
+            </div>
+        </div>
     </div>
-    <div id="model-selector">
-        <label for="model-select">Model:</label>
-        <select id="model-select">
-            <option value="">Loading models...</option>
-        </select>
-    </div>
+
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>

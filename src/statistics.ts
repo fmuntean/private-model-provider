@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { TokenUsageByType } from './types';
 
 /**
  * Statistics for a single request
@@ -9,6 +10,7 @@ export interface RequestStats {
   outputTokens: number;
   responseTimeMs: number;
   timestamp: Date;
+  messageType?: keyof TokenUsageByType;
 }
 
 /**
@@ -21,6 +23,7 @@ export interface SessionStats {
   averageResponseTimeMs: number;
   lastResponseTimeMs: number;
   sessionStartTime: Date;
+  tokenUsageByType: TokenUsageByType;
 }
 
 /**
@@ -30,6 +33,13 @@ export class StatisticsManager implements vscode.Disposable {
   private requests: RequestStats[] = [];
   private sessionStartTime: Date = new Date();
   private onStatsUpdateEmitter = new vscode.EventEmitter<SessionStats>();
+  private tokenUsageByType: TokenUsageByType = {
+    prompt: 0,
+    context: 0,
+    user: 0,
+    agent: 0,
+    tools: 0
+  };
 
   /**
    * Event fired when statistics are updated
@@ -44,6 +54,16 @@ export class StatisticsManager implements vscode.Disposable {
       ...stats,
       timestamp: new Date(),
     });
+
+    // Update per-type tracking if messageType is provided
+    if (stats.messageType) {
+      if (stats.messageType === 'prompt' || stats.messageType === 'context' || stats.messageType === 'user') {
+        this.tokenUsageByType[stats.messageType] += stats.inputTokens;
+      } else if (stats.messageType === 'agent' || stats.messageType === 'tools') {
+        this.tokenUsageByType[stats.messageType] += stats.outputTokens;
+      }
+    }
+
     this.onStatsUpdateEmitter.fire(this.getSessionStats());
   }
 
@@ -64,6 +84,7 @@ export class StatisticsManager implements vscode.Disposable {
       averageResponseTimeMs: totalRequests > 0 ? Math.round(totalResponseTime / totalRequests) : 0,
       lastResponseTimeMs: lastRequest?.responseTimeMs ?? 0,
       sessionStartTime: this.sessionStartTime,
+      tokenUsageByType: { ...this.tokenUsageByType }
     };
   }
 
@@ -91,6 +112,13 @@ export class StatisticsManager implements vscode.Disposable {
   public resetStats(): void {
     this.requests = [];
     this.sessionStartTime = new Date();
+    this.tokenUsageByType = {
+      prompt: 0,
+      context: 0,
+      user: 0,
+      agent: 0,
+      tools: 0
+    };
     this.onStatsUpdateEmitter.fire(this.getSessionStats());
   }
 
@@ -101,7 +129,11 @@ export class StatisticsManager implements vscode.Disposable {
    * statistics aggregation works without requiring callers to compute the
    * request duration themselves.
    */
-  public async recordChatUsage(usage: { total_tokens: number; prompt_tokens: number; completion_tokens: number }, modelId: string = 'unknown'): Promise<void> {
+  public async recordChatUsage(
+    usage: { total_tokens: number; prompt_tokens: number; completion_tokens: number },
+    modelId: string = 'unknown',
+    messageType?: keyof TokenUsageByType
+  ): Promise<void> {
     // Approximate response time as unknown here – callers can update later if needed.
     // We treat `prompt_tokens` as input and `completion_tokens` as output.
     this.recordRequest({
@@ -109,6 +141,7 @@ export class StatisticsManager implements vscode.Disposable {
       inputTokens: usage.prompt_tokens ?? 0,
       outputTokens: usage.completion_tokens ?? 0,
       responseTimeMs: 0,
+      messageType
     });
   }
 

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getLogger, Logger } from './logger';
 
 /**
  * Secret key constants
@@ -10,11 +11,11 @@ const API_KEY_SECRET = 'local.model.provider.apiKey';
  */
 export class SecretManager {
   private readonly secretStorage: vscode.SecretStorage;
-  private readonly outputChannel: vscode.OutputChannel;
+  private readonly logger: Logger;
 
-  constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+  constructor(context: vscode.ExtensionContext) {
     this.secretStorage = context.secrets;
-    this.outputChannel = outputChannel;
+    this.logger = getLogger();
   }
 
   /**
@@ -35,18 +36,18 @@ export class SecretManager {
       if (settingsKey) {
         // Migrate to secure storage
         await this.setApiKey(settingsKey);
-        this.outputChannel.appendLine('[SECURITY] Migrated API key from settings to secure storage');
+        this.logger.info('[SECURITY] Migrated API key from settings to secure storage');
         
         // Clear from settings
         await config.update('apiKey', undefined, vscode.ConfigurationTarget.Global);
-        this.outputChannel.appendLine('[SECURITY] Cleared API key from settings');
+        this.logger.info('[SECURITY] Cleared API key from settings');
         
         return settingsKey;
       }
 
       return '';
     } catch (error) {
-      this.outputChannel.appendLine(`[ERROR] Failed to retrieve API key: ${error}`);
+      this.logger.error('[ERROR] Failed to retrieve API key:', error);
       return '';
     }
   }
@@ -58,13 +59,13 @@ export class SecretManager {
     try {
       if (apiKey) {
         await this.secretStorage.store(API_KEY_SECRET, apiKey);
-        this.outputChannel.appendLine('[SECURITY] API key stored securely');
+        this.logger.info('[SECURITY] API key stored securely');
       } else {
         await this.secretStorage.delete(API_KEY_SECRET);
-        this.outputChannel.appendLine('[SECURITY] API key removed from secure storage');
+        this.logger.info('[SECURITY] API key removed from secure storage');
       }
     } catch (error) {
-      this.outputChannel.appendLine(`[ERROR] Failed to store API key: ${error}`);
+      this.logger.error('[ERROR] Failed to store API key:', error);
       throw error;
     }
   }
@@ -75,9 +76,9 @@ export class SecretManager {
   async deleteApiKey(): Promise<void> {
     try {
       await this.secretStorage.delete(API_KEY_SECRET);
-      this.outputChannel.appendLine('[SECURITY] API key deleted from secure storage');
+      this.logger.info('[SECURITY] API key deleted from secure storage');
     } catch (error) {
-      this.outputChannel.appendLine(`[ERROR] Failed to delete API key: ${error}`);
+      this.logger.error('[ERROR] Failed to delete API key:', error);
       throw error;
     }
   }

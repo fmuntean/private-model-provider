@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { GatewayClient } from './client';
-import { GatewayConfig, OpenAIChatCompletionRequest } from './types';
-import { SecretManager } from './secrets';
+import { GatewayConfig, OpenAIChatCompletionRequest, ChatMessageType, ChatSession } from './types';
+import { SecretManager } from './secretManager';
 import { StatisticsManager } from './statistics';
+import { SessionManager } from './sessionManager';
+import { getLogger, Logger } from './logger';
 // Added for logging chat history
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,9 +16,10 @@ import { randomUUID } from 'crypto';
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: GatewayClient;
   private config: GatewayConfig;
-  private readonly outputChannel: vscode.OutputChannel;
   private readonly secretManager: SecretManager;
   private readonly statsManager: StatisticsManager | null;
+  private readonly sessionManager: SessionManager;
+  private readonly logger: Logger;
   // Store tool schemas for the current request to fill missing required properties
   private readonly currentToolSchemas: Map<string, unknown> = new Map();
   // Track if we've shown the welcome notification this session
@@ -30,10 +33,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly _onDidChangeLanguageModelChatInformation = new vscode.EventEmitter<void>();
   public readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformation.event;
 
-  constructor(private readonly context: vscode.ExtensionContext, statsManager?: StatisticsManager) {
-    this.outputChannel = vscode.window.createOutputChannel('Local Model Provider');
-    this.secretManager = new SecretManager(context, this.outputChannel);
+  constructor(
+    private readonly context: vscode.ExtensionContext, 
+    statsManager?: StatisticsManager,
+    sessionManager?: SessionManager
+  ) {
+    this.logger = getLogger();
+    this.secretManager = new SecretManager(context);
     this.statsManager = statsManager ?? null;
+    this.sessionManager = sessionManager ?? new SessionManager(context);
     this.config = this.loadConfig();
     this.client = new GatewayClient(this.config, {
       maxRetries: this.config.maxRetries,
@@ -56,7 +64,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
         if (e.affectsConfiguration('local.model.provider')) {
-          this.log('info', 'Configuration changed, reloading...');
+          this.logger.info('Configuration changed, reloading...');
           this.reloadConfig();
           // Clear model cache on config change
           this.cachedModels = null;
@@ -70,23 +78,29 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Ensure the daily log folder exists: /ai-logs/YYYY-MM-DD
    */
   private ensureLogFolder(): string {
-    // Use the workspace root as the base for logs, falling back to extension path if unavailable
-    let workspaceRoot = '';
-    const folders = vscode.workspace.workspaceFolders;
-    if (folders && folders.length > 0) {
-      workspaceRoot = folders[0].uri.fsPath;
-    } else {
-      workspaceRoot = this.context.extensionPath;
-    }
+    // Determine the workspace root, fallback to extension storage if no workspace is open
+    const workspaceRoot = this.getWorkspaceRoot();
     const base = path.join(workspaceRoot, 'ai-logs');
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const folder = path.join(base, today);
     try {
       fs.mkdirSync(folder, { recursive: true });
     } catch (e) {
-      this.log('error', `Failed to create log folder ${folder}: ${e}`);
+      this.logger.error(`Failed to create log folder ${folder}:`, e);
     }
     return folder;
+  }
+
+  /**
+   * Retrieve the workspace root path, mirroring the logic in SessionManager.
+   */
+  private getWorkspaceRoot(): string {
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+      return folders[0].uri.fsPath;
+    }
+    // Fallback to the extension's global storage path
+    return this.context.globalStorageUri.fsPath;
   }
 
   /**
@@ -103,7 +117,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     try {
       fs.appendFileSync(filePath, line + '\n');
     } catch (e) {
-      this.log('error', `Failed to write log entry to ${filePath}: ${e}`);
+      this.logger.error(`Failed to write log entry to ${filePath}:`, e);
     }
   }
 
@@ -116,10 +130,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (apiKey) {
         this.config.apiKey = apiKey;
         this.client.updateConfig(this.config);
-        this.log('info', 'API key loaded from secure storage');
+        this.logger.info('API key loaded from secure storage');
       }
     } catch (error) {
-      this.log('error', `Failed to load API key: ${error}`);
+      this.logger.error('Failed to load API key:', error);
     }
   }
 
@@ -131,12 +145,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const apiKey = await this.secretManager.getApiKey();
       this.config.apiKey = apiKey || '';
       this.client.updateConfig(this.config);
-      this.log('info', apiKey ? 'API key updated from secure storage' : 'API key cleared');
+      this.logger.info(apiKey ? 'API key updated from secure storage' : 'API key cleared');
       // Clear model cache so next call revalidates with new credentials
       this.cachedModels = null;
       this.modelCacheTimestamp = 0;
     } catch (error) {
-      this.log('error', `Failed to refresh API key: ${error}`);
+      this.logger.error('Failed to refresh API key:', error);
     }
   }
 
@@ -146,7 +160,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   public clearModelCache(): void {
     this.cachedModels = null;
     this.modelCacheTimestamp = 0;
-    this.log('info', 'Model cache cleared');
+    this.logger.info('Model cache cleared');
     // Notify VS Code that the model list has changed
     this._onDidChangeLanguageModelChatInformation.fire();
   }
@@ -173,29 +187,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Get the output channel for external use (e.g., commands)
    */
   public getOutputChannel(): vscode.OutputChannel {
-    return this.outputChannel;
-  }
-
-  /**
-   * Log levels for filtering output
-   */
-  private readonly LOG_LEVELS: Record<string, number> = {
-    debug: 0,
-    info: 1,
-    warn: 2,
-    error: 3,
-  };
-
-  /**
-   * Log a message with the specified level
-   */
-  private log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void {
-    const configLevel = this.config?.logLevel || 'info';
-    if (this.LOG_LEVELS[level] >= this.LOG_LEVELS[configLevel]) {
-      const timestamp = new Date().toISOString();
-      const prefix = level.toUpperCase().padEnd(5);
-      this.outputChannel.appendLine(`[${timestamp}] [${prefix}] ${message}`);
-    }
+    this.logger.show();
+    return this.logger.getOutputChannel();
   }
 
   /**
@@ -284,9 +277,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       safeMaxOutputTokens = Math.max(64, Math.floor((this.config.defaultMaxOutputTokens || 2048) / 2));
     }
 
-    this.outputChannel.appendLine(
-      `Token estimate: input=${estimatedInputTokens}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
-    );
+    this.logger.info(`Token estimate: input=${estimatedInputTokens}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`);
 
     const requestOptions: any = {
       model: model.id,
@@ -318,7 +309,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
 
       requestOptions.parallel_tool_calls = this.config.parallelToolCalling;
-      this.outputChannel.appendLine(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
+      this.logger.info(`Sending ${requestOptions.tools.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
     }
   }
 
@@ -383,7 +374,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     if (filledProperties.length > 0) {
-      this.outputChannel.appendLine(`  AUTO-FILLED missing required properties: ${filledProperties.join(', ')}`);
+      this.logger.info(`  AUTO-FILLED missing required properties: ${filledProperties.join(', ')}`);
     }
 
     return filledArgs;
@@ -430,7 +421,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       return messages;
     }
 
-    this.outputChannel.appendLine(`Context overflow: ${totalTokens} tokens > ${maxTokens} limit. Truncating...`);
+    this.logger.info(`Context overflow: ${totalTokens} tokens > ${maxTokens} limit. Truncating...`);
 
     // Strategy: Keep first message (system) and as many recent messages as possible
     const result: any[] = [];
@@ -458,7 +449,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Combine first message with recent messages
     result.push(...recentMessages);
 
-    this.outputChannel.appendLine(`Truncated: kept ${result.length}/${messages.length} messages, ~${usedTokens} tokens`);
+    this.logger.info(`Truncated: kept ${result.length}/${messages.length} messages, ~${usedTokens} tokens`);
 
     return result;
   }
@@ -525,8 +516,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     try {
       return JSON.parse(repaired);
     } catch {
-      this.outputChannel.appendLine(`JSON repair failed. Original: ${jsonStr}`);
-      this.outputChannel.appendLine(`Repaired attempt: ${repaired}`);
+      this.logger.error(`JSON repair failed. Original: ${jsonStr}`);
+      this.logger.error(`Repaired attempt: ${repaired}`);
       return null;
     }
   }
@@ -537,7 +528,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
   ): Promise<void> {
-    this.outputChannel.appendLine(`Streaming chat completion...`);
+    this.logger.info(`Streaming chat completion...`);
     let totalContent = '';
     let totalToolCalls = 0;
 
@@ -550,14 +541,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
       // Report text content immediately
       if (chunk.content) {
-        this.outputChannel.appendLine("CHUNK: "+chunk.content);
+        this.logger.debug("CHUNK: "+chunk.content);
         totalContent += chunk.content;
         progress.report(new vscode.LanguageModelTextPart(chunk.content));
       }
 
       if (chunk.reasoning_content){
-        this.outputChannel.appendLine("THINK: "+chunk.content);
-        this.log('info','THINK: ${chunk.reasoning_content}');
+        this.logger.debug("THINK: "+chunk.reasoning_content);
         progress.report(new vscode.MarkdownString(chunk.reasoning_content));
       }
 
@@ -569,15 +559,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
         for (const toolCall of chunk.finished_tool_calls) {
           totalToolCalls++;
-          this.outputChannel.appendLine(`Tool call received: id=${toolCall.id}, name=${toolCall.name}`);
-          this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
+          this.logger.info(`Tool call received: id=${toolCall.id}, name=${toolCall.name}`);
+          this.logger.debug(`  Raw arguments: ${toolCall.arguments.substring(0, 500)}${toolCall.arguments.length > 500 ? '...' : ''}`);
 
           // Parse arguments with repair capability
           let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
           if (args === null) {
-            this.log('error', ` Failed to parse tool call arguments for ${toolCall.name}`);
-            this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+            this.logger.error(`Failed to parse tool call arguments for ${toolCall.name}`);
+            this.logger.debug(`  Full arguments: ${toolCall.arguments}`);
             args = {}; // Fallback to empty args
           }
 
@@ -590,17 +580,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+    this.logger.info(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
 
     // --- START OF NEW USAGE-AWARE STATS CALCULATION ---
     // The client layer now returns the final usage object upon successful stream completion.
     // We must pass this to the provider's stats manager for accurate accounting.
     if ( usage && this.statsManager) {
-      this.outputChannel.appendLine(`[STATS] Usage data received: Total=${usage.total_tokens}, Prompt=${usage.prompt_tokens}, Completion=${usage.completion_tokens}`);
+      this.logger.info(`[STATS] Usage data received: Total=${usage.total_tokens}, Prompt=${usage.prompt_tokens}, Completion=${usage.completion_tokens}`);
       // Assuming a method exists or needs to be called here to finalize stats with usage object
       await this.statsManager.recordChatUsage(usage); 
     } else {
-      this.outputChannel.appendLine(`[STATS] Warning: Could not retrieve final usage data for statistics recording.`);
+      this.logger.warn(`[STATS] Warning: Could not retrieve final usage data for statistics recording.`);
     }
     // --- END OF NEW USAGE-AWARE STATS CALCULATION ---
   }
@@ -618,17 +608,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     } catch {
       // Ignore init errors here; downstream will surface issues
     }
-    this.log('debug', `API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
+    this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
     // Check cache first
     const now = Date.now();
     if (this.cachedModels && this.config.modelCacheTtlMs > 0 && 
         (now - this.modelCacheTimestamp) < this.config.modelCacheTtlMs) {
-      this.log('debug', `Using cached models (${this.cachedModels.length} models, cache age: ${now - this.modelCacheTimestamp}ms)`);
+      this.logger.debug(`Using cached models (${this.cachedModels.length} models, cache age: ${now - this.modelCacheTimestamp}ms)`);
       return this.cachedModels;
     }
 
     try {
-      this.log('info', 'Fetching models from inference server...');
+      this.logger.info('Fetching models from inference server...');
       const response = await this.client.fetchModels();
 
       const models = response.data.map((model) => {
@@ -651,11 +641,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.cachedModels = models;
       this.modelCacheTimestamp = now;
 
-      this.log('info', `Found ${models.length} models: ${models.map(m => m.id).join(', ')}`);
+      this.logger.info(`Found ${models.length} models: ${models.map(m => m.id).join(', ')}`);
       return models;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.log('error', `Failed to fetch models: ${errorMessage}`);
+      this.logger.error(`Failed to fetch models: ${errorMessage}`);
       if (!options.silent) {
         vscode.window.showErrorMessage(
           `Local Model Provider: Failed to fetch models. ${errorMessage}`,
@@ -681,20 +671,33 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   ): void {
     const anyPart = part as Record<string, unknown>;
     if ('callId' in anyPart && 'content' in anyPart && !('name' in anyPart)) {
-      this.outputChannel.appendLine(`  Found tool result (duck-typed): callId=${anyPart.callId}`);
+      this.logger.debug(`  Found tool result (duck-typed): callId=${anyPart.callId}`);
       toolResults.push({
         tool_call_id: anyPart.callId,
         role: 'tool',
         content: typeof anyPart.content === 'string' ? anyPart.content : JSON.stringify(anyPart.content),
       });
     } else if ('callId' in anyPart && 'name' in anyPart && 'input' in anyPart) {
-      this.outputChannel.appendLine(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
+      this.logger.debug(`  Found tool call (duck-typed): callId=${anyPart.callId}, name=${anyPart.name}`);
       toolCalls.push({
         id: anyPart.callId,
         type: 'function',
         function: { name: anyPart.name, arguments: JSON.stringify(anyPart.input) },
       });
     }
+  }
+
+  /**
+   * Extract text content from a VS Code chat message
+   */
+  private extractTextFromMessage(msg: vscode.LanguageModelChatMessage): string {
+    let textContent = '';
+    for (const part of msg.content) {
+      if (part instanceof vscode.LanguageModelTextPart) {
+        textContent += part.value;
+      }
+    }
+    return textContent;
   }
 
   /**
@@ -710,10 +713,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (part instanceof vscode.LanguageModelTextPart) {
         textContent += part.value;
       } else if (part instanceof vscode.LanguageModelToolResultPart) {
-        this.outputChannel.appendLine(`  Found tool result: callId=${part.callId}`);
+        this.logger.debug(`  Found tool result: callId=${part.callId}`);
         toolResults.push(this.convertToolResultPart(part));
       } else if (part instanceof vscode.LanguageModelToolCallPart) {
-        this.outputChannel.appendLine(`  Found tool call: callId=${part.callId}, name=${part.name}`);
+        this.logger.debug(`  Found tool call: callId=${part.callId}, name=${part.name}`);
         toolCalls.push(this.convertToolCallPart(part));
       } else {
         this.processPartDuckTyped(part, toolResults, toolCalls);
@@ -759,14 +762,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.currentToolSchemas.clear();
 
     return options.tools.map((tool) => {
-      this.outputChannel.appendLine(`Tool: ${tool.name}`);
-      this.outputChannel.appendLine(`  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
+      this.logger.info(`Tool: ${tool.name}`);
+      this.logger.debug(`  Description: ${tool.description?.substring(0, 100) || 'none'}...`);
 
       const schema = tool.inputSchema as Record<string, unknown> | undefined;
       this.currentToolSchemas.set(tool.name, schema);
 
       if (schema?.required && Array.isArray(schema.required)) {
-        this.outputChannel.appendLine(`  Required properties: ${(schema.required as string[]).join(', ')}`);
+        this.logger.debug(`  Required properties: ${(schema.required as string[]).join(', ')}`);
       }
 
       return {
@@ -783,20 +786,20 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     toolCall: { id: string; name: string; arguments: string },
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
   ): void {
-    this.outputChannel.appendLine(`\n=== TOOL CALL RECEIVED ===`);
-    this.outputChannel.appendLine(`  ID: ${toolCall.id}`);
-    this.outputChannel.appendLine(`  Name: ${toolCall.name}`);
-    this.outputChannel.appendLine(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
+    this.logger.info(`\n=== TOOL CALL RECEIVED ===`);
+    this.logger.info(`  ID: ${toolCall.id}`);
+    this.logger.info(`  Name: ${toolCall.name}`);
+    this.logger.debug(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
 
     let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
     if (args === null) {
-      this.outputChannel.appendLine(`  ERROR: Failed to parse tool call arguments`);
-      this.outputChannel.appendLine(`  Full arguments: ${toolCall.arguments}`);
+      this.logger.error(`  ERROR: Failed to parse tool call arguments`);
+      this.logger.debug(`  Full arguments: ${toolCall.arguments}`);
       args = {};
     } else {
       const argKeys = Object.keys(args);
-      this.outputChannel.appendLine(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
+      this.logger.debug(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
     }
 
     const toolSchema = this.currentToolSchemas.get(toolCall.name) as Record<string, unknown> | undefined;
@@ -804,7 +807,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       args = this.fillMissingRequiredProperties(args, toolCall.name, toolSchema);
     }
 
-    this.outputChannel.appendLine(`=== END TOOL CALL ===\n`);
+    this.logger.info(`=== END TOOL CALL ===\n`);
     progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args));
   }
 
@@ -822,16 +825,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const inputTokenCount = await this.provideTokenCount(model, inputText, token);
     const modelMaxContext = this.config.defaultMaxTokens || 32768;
 
-    this.log('warn', ` Model returned empty response with no tool calls.`);
-    this.outputChannel.appendLine(`  Input tokens estimated: ${inputTokenCount}`);
-    this.outputChannel.appendLine(`  Messages in conversation: ${messageCount}`);
-    this.outputChannel.appendLine(`  Tools provided: ${toolCount}`);
+    this.logger.warn(` Model returned empty response with no tool calls.`);
+    this.logger.info(`  Input tokens estimated: ${inputTokenCount}`);
+    this.logger.info(`  Messages in conversation: ${messageCount}`);
+    this.logger.info(`  Tools provided: ${toolCount}`);
 
     const errorHint = toolCount > 0
       ? `The model returned an empty response. This typically indicates the model failed to generate valid output with tool calling enabled. Check the inference server logs for errors.`
       : `The model returned an empty response. Check the inference server logs for details.`;
 
-    this.outputChannel.appendLine(`  Issue: ${errorHint}`);
+    this.logger.info(`  Issue: ${errorHint}`);
 
     const errorMessage = `I was unable to generate a response. ${errorHint}\n\n` +
       `Diagnostic info:\n- Model: ${model.id}\n- Tools provided: ${toolCount}\n` +
@@ -848,24 +851,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : '';
 
-    this.log('error', ` Chat request failed: ${errorMessage}`);
+    this.logger.error(` Chat request failed: ${errorMessage}`);
     if (errorStack) {
-      this.outputChannel.appendLine(`Stack trace: ${errorStack}`);
+      this.logger.error(`Stack trace: ${errorStack}`);
     }
 
     const isToolError = errorMessage.includes('HarmonyError') || errorMessage.includes('unexpected tokens');
 
     if (isToolError) {
-      this.outputChannel.appendLine('HINT: This appears to be a tool calling format error.');
-      this.outputChannel.appendLine('The model may not support function calling properly.');
-      this.outputChannel.appendLine('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
+      this.logger.info('HINT: This appears to be a tool calling format error.');
+      this.logger.info('The model may not support function calling properly.');
+      this.logger.info('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
 
       vscode.window.showErrorMessage(
         `Local Model Provider: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
         'Open Output', 'Disable Tool Calling'
       ).then((selection: string | undefined) => {
         if (selection === 'Open Output') {
-          this.outputChannel.show();
+          this.logger.show();
         } else if (selection === 'Disable Tool Calling') {
           vscode.workspace.getConfiguration('local.model.provider').update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
         }
@@ -893,9 +896,21 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     } catch {
       // Continue; errors will be handled by request path
     }
-    this.log('debug', `API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
-    // Generate a unique chat identifier for this request
-    const chatId = randomUUID();
+    this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
+
+    // Get or create active session
+    let session = this.sessionManager.getActiveSession();
+    this.logger.info(`provideLanguageModelChatResponse: Active session: ${session?.id || 'none'}`);
+    if (!session) {
+      session = this.sessionManager.createSession(model.id);
+      this.logger.info(`Created new chat session in provideLanguageModelChatResponse: ${session.id}`);
+    } else {
+      this.logger.info(`Using existing session: ${session.id} with ${session.messages.length} messages`);
+    }
+
+    // Generate a unique chat identifier for this request (for logging)
+    const chatId = session.id;
+    
     // Log the incoming request
     this.writeLogEntry(chatId, {
       type: 'request',
@@ -903,42 +918,70 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       messages,
       options,
     });
-    this.log('info', `Sending chat request to model: ${model.id}`);
-    this.log('debug', `Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
-    this.log('debug', `Message count: ${messages.length}`);
+    this.logger.info(`Sending chat request to model: ${model.id} (Session: ${session.id})`);
+    this.logger.debug(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
+    this.logger.debug(`Message count: ${messages.length}`);
 
     this.showWelcomeNotification(model.id);
 
-    // Convert messages
+    // Convert messages and track them in the session
     const openAIMessages: Record<string, unknown>[] = [];
+    
+    // Add master prompt from session if it's the first message
+    const masterPrompt = this.sessionManager.getMasterPrompt();
+    if (session.messages.length === 0 && masterPrompt) {
+      const promptMessage = this.sessionManager.addMessage('prompt', 'system', masterPrompt);
+      if (promptMessage) {
+        openAIMessages.push({ role: 'system', content: masterPrompt, messageType: 'prompt' });
+        this.logger.debug('Added master prompt from session to request');
+      }
+    }
+
     // If a system prompt override is configured, prepend it as the first message
     const systemPrompt = vscode.workspace.getConfiguration('local.model.provider').get<string>('systemPromptOverride', '').trim();
-    if (systemPrompt) {
-      openAIMessages.push({ role: 'system', content: systemPrompt });
-      this.log('debug', 'Added system prompt override to request');
+    if (systemPrompt && !masterPrompt) {
+      openAIMessages.push({ role: 'system', content: systemPrompt, messageType: 'prompt' });
+      this.logger.debug('Added system prompt override to request');
     }
-    // If we added an override, and the first original message is a system prompt, skip it to avoid duplication
+
+    // Convert VS Code messages to OpenAI format and add to session
     let startIdx = 0;
-    if (systemPrompt && messages.length > 0) {
+    if ((systemPrompt || masterPrompt) && messages.length > 0) {
       const firstMsg = messages[0];
-      // VS Code may represent system messages with role 'system' (if available) or as a user message with special content.
-      // We conservatively check the role via the mapRole conversion later; here we inspect the raw role if present.
-      // Since LanguageModelChatMessageRole does not expose a System enum, we check the string value directly.
-      // @ts-ignore – accessing possibly undocumented property for safety.
+      // @ts-ignore – checking for system role
       if (firstMsg.role === 3) {
         startIdx = 1;
       }
     }
+
     for (let i = startIdx; i < messages.length; i++) {
-      openAIMessages.push(...this.convertSingleMessageWithLogging(messages[i]));
+      const msg = messages[i];
+      const convertedMsgs = this.convertSingleMessageWithLogging(msg);
+      
+      // Determine message type based on role and content
+      let messageType: ChatMessageType = 'user';
+      if (msg.role === vscode.LanguageModelChatMessageRole.User) {
+        messageType = 'user';
+        // Add user message to session
+        const textContent = this.extractTextFromMessage(msg);
+        if (textContent) {
+          this.sessionManager.addMessage('user', 'user', textContent);
+        }
+      } else if (msg.role === vscode.LanguageModelChatMessageRole.Assistant) {
+        messageType = 'agent';
+      }
+
+      for (const converted of convertedMsgs) {
+        openAIMessages.push({ ...converted, messageType });
+      }
     }
-    this.log('debug', `Converted to ${openAIMessages.length} OpenAI messages`);
+    this.logger.debug(`Converted to ${openAIMessages.length} OpenAI messages`);
 
     // Log message structure
     for (let i = 0; i < openAIMessages.length; i++) {
       const msg = openAIMessages[i];
       const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';
-      this.log('debug', `  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
+      this.logger.debug(`  Message ${i + 1}: role=${msg.role}, hasContent=${!!msg.content}, hasToolCalls=${!!msg.tool_calls}, toolCallId=${toolCallId}`);
     }
 
     // Calculate token limits; avoid premature truncation by checking a real estimate first
@@ -964,7 +1007,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const maxInputTokens = reservedForInput;
       truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
       if (truncatedMessages.length < openAIMessages.length) {
-        this.log('warn', `Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
+        this.logger.warn(`Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
       }
     }
 
@@ -981,7 +1024,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const estimatedInputTokens = await this.provideTokenCount(model, inputText, token);
     const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsOverhead);
 
-    this.log('debug',
+    this.logger.debug(
       `Token estimate: input=${estimatedInputTokens}, tools=${toolsOverhead}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
     );
 
@@ -1020,7 +1063,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (this.config.parallelToolCalling) {
         requestOptions.parallel_tool_calls = true;
       }
-      this.log('info', `Sending ${toolsConfig.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
+      this.logger.info(`Sending ${toolsConfig.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
     }
 
     if (options.modelOptions) {
@@ -1029,7 +1072,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Log request
     const debugRequest = JSON.stringify(requestOptions, null, 2);
-    this.log('debug', debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
+    this.logger.debug(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
 
     // Track timing for statistics
     const requestStartTime = Date.now();
@@ -1051,7 +1094,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (typeof (vscode as any).LanguageModelThinkingPart !== 'undefined') {
             progress.report(new (vscode as any).LanguageModelThinkingPart(chunk.reasoning_content));
           } else {
-            // Fallback: wrap reasoning in  ground tags for visibility
+            // Fallback: wrap reasoning in ground tags for visibility
             progress.report(new vscode.MarkdownString(chunk.reasoning_content));
           }
         }
@@ -1073,19 +1116,42 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       }
 
-      this.outputChannel.appendLine(`Completed chat request, received ${totalContent.length} characters, ${totalReasoningContent.length} reasoning characters, ${totalToolCalls} tool calls`);
+      this.logger.info(`Completed chat request, received ${totalContent.length} characters, ${totalReasoningContent.length} reasoning characters, ${totalToolCalls} tool calls`);
 
       // --- START OF NEW USAGE-AWARE STATS CALCULATION ---
       // The client layer now returns the final usage object upon successful stream completion.
       // We must pass this to the provider's stats manager for accurate accounting.
       if (usage && this.statsManager) {
-        this.outputChannel.appendLine(`[STATS] Usage data received: Total=${usage.total_tokens}, Prompt=${usage.prompt_tokens}, Completion=${usage.completion_tokens}`);
-        // Assuming a method exists or needs to be called here to finalize stats with usage object
-        await this.statsManager.recordChatUsage(usage); 
+        this.logger.info(`[STATS] Usage data received: Total=${usage.total_tokens}, Prompt=${usage.prompt_tokens}, Completion=${usage.completion_tokens}`);
+        // Record usage with stats manager
+        await this.statsManager.recordChatUsage(usage, model.id);
+        
+        // Update session token usage by type (hybrid approach)
+        if (usage.prompt_tokens && usage.completion_tokens) {
+          // Estimate breakdown: assume prompt tokens are from user/context/prompt messages
+          // and completion tokens are from agent responses
+          const promptTokens = usage.prompt_tokens;
+          const completionTokens = usage.completion_tokens;
+          
+          // Add agent response tokens
+          this.sessionManager.updateTokenUsage('agent', 0, completionTokens);
+          
+          // Estimate input tokens distribution (simplified approach)
+          // In practice, you might want more sophisticated tracking
+          this.sessionManager.updateTokenUsage('user', Math.floor(promptTokens * 0.6), 0);
+          this.sessionManager.updateTokenUsage('prompt', Math.floor(promptTokens * 0.2), 0);
+          this.sessionManager.updateTokenUsage('context', Math.floor(promptTokens * 0.2), 0);
+        }
       } else {
-        this.outputChannel.appendLine(`[STATS] Warning: Could not retrieve final usage data for statistics recording.`);
+        this.logger.warn(`[STATS] Warning: Could not retrieve final usage data for statistics recording.`);
       }
       // --- END OF NEW USAGE-AWARE STATS CALCULATION ---
+      
+      // Add agent response to session
+      if (totalContent) {
+        this.sessionManager.addMessage('agent', 'assistant', totalContent, { modelId: model.id });
+      }
+
       // Log the full response
       this.writeLogEntry(chatId, {
         type: 'response',
@@ -1155,7 +1221,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     let serverUrlRaw = config.get<string>('serverUrl', 'http://localhost:8000');
     if (/\/v1\/?$/.test(serverUrlRaw)) {
       serverUrlRaw = serverUrlRaw.replace(/\/v1\/?$/, '');
-      this.outputChannel.appendLine('NOTE: Stripped trailing /v1 from serverUrl setting to avoid duplicated path.');
+      this.logger.info('NOTE: Stripped trailing /v1 from serverUrl setting to avoid duplicated path.');
     }
 
     const cfg: GatewayConfig = {
@@ -1179,7 +1245,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Validate requestTimeout
     if (cfg.requestTimeout <= 0) {
-      this.log('error', ` requestTimeout must be > 0; using default 60000`);
+      this.logger.error(` requestTimeout must be > 0; using default 60000`);
       cfg.requestTimeout = 60000;
     }
 
@@ -1187,14 +1253,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     try {
       new URL(cfg.serverUrl);
     } catch {
-      this.log('error', ` Invalid server URL: ${cfg.serverUrl}`);
+      this.logger.error(` Invalid server URL: ${cfg.serverUrl}`);
       throw new Error(`Invalid server URL: ${cfg.serverUrl}`);
     }
 
     // Validate defaultMaxOutputTokens relative to defaultMaxTokens
     if (cfg.defaultMaxOutputTokens >= cfg.defaultMaxTokens) {
       const adjusted = Math.max(64, cfg.defaultMaxTokens - 256);
-      this.outputChannel.appendLine(
+      this.logger.warn(
         `WARNING: github.copilot.llm-gateway.defaultMaxOutputTokens (${cfg.defaultMaxOutputTokens}) >= defaultMaxTokens (${cfg.defaultMaxTokens}). Adjusting to ${adjusted}.`
       );
       vscode.window.showWarningMessage(
@@ -1212,15 +1278,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private reloadConfig(): void {
     this.config = this.loadConfig();
     this.client.updateConfig(this.config);
-    this.outputChannel.appendLine('Configuration reloaded');
+    this.logger.info('Configuration reloaded');
   }
 
   /**
    * Send a simple message from the chat webview and return the response.
    * This is a simplified interface for the webview that doesn't use streaming.
    */
-  public async sendMessage(text: string, modelId?: string): Promise<{ content: string; usage?: any }> {
+  public async sendMessage(text: string, modelId?: string, sessionId?: string): Promise<{ content: string; usage?: any }> {
     await this.initializationPromise;
+    this.logger.info(`sendMessage called with text: ${text.substring(0, 50)}..., modelId: ${modelId}, sessionId: ${sessionId}`);
 
     // Use provided model or fall back to default
     const targetModelId = modelId ||
@@ -1230,11 +1297,65 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       throw new Error('No model selected. Please select a model from the dropdown.');
     }
 
-    // Build the request
-    const messages = [{ role: 'user', content: text }];
+    // Get or create session
+    let session: ChatSession | null = null;
+    let isNewSession = false;
+    if (sessionId) {
+      session = this.sessionManager['sessions'].get(sessionId) || null;
+      this.logger.info(`Looking for session with ID: ${sessionId}, found: ${!!session}`);
+    } else {
+      session = this.sessionManager.getActiveSession();
+      this.logger.info(`No sessionId provided, active session: ${session?.id || 'none'}`);
+    }
+    
+    if (!session) {
+      this.logger.info(`No session found, creating new session with model: ${targetModelId}`);
+      session = this.sessionManager.createSession(targetModelId);
+      isNewSession = true;
+      this.logger.info(`Created new chat session: ${session.id}`);
+    } else {
+      this.logger.info(`Using existing session: ${session.id}`);
+    }
+
+    // Add user message to session
+    this.sessionManager.addMessage('user', 'user', text);
+
+    // Generate session title if this is a new session (after first user message)
+    if (isNewSession) {
+      // Fire and forget - don't await to avoid blocking the response
+      this.generateSessionTitle(text, session.id).catch(err => {
+        this.logger.error(`Failed to generate session title: ${err}`);
+      });
+    }
+
+    // Build the request with conversation history
+    const openAIMessages: Record<string, unknown>[] = [];
+    
+    // Add master prompt if it's the first message
+    const masterPrompt = this.sessionManager.getMasterPrompt();
+    if (session.messages.length <= 1 && masterPrompt) {
+      openAIMessages.push({ role: 'system', content: masterPrompt, messageType: 'prompt' });
+    }
+
+    // Add conversation history from session
+    for (const msg of session.messages) {
+      if (msg.role === 'system' && msg.type === 'prompt') {
+        // Skip if we already added the master prompt
+        if (openAIMessages.length === 0 || openAIMessages[0].role !== 'system') {
+          openAIMessages.push({ role: 'system', content: msg.content, messageType: 'prompt' });
+        }
+      } else {
+        openAIMessages.push({ 
+          role: msg.role, 
+          content: msg.content,
+          messageType: msg.type
+        });
+      }
+    }
+
     const requestOptions: any = {
       model: targetModelId,
-      messages: messages,
+      messages: openAIMessages,
       max_tokens: this.config.defaultMaxOutputTokens || 2048,
       temperature: 0.7,
       stream: false, // We want a complete response, not streaming
@@ -1252,19 +1373,38 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     try {
-      this.log('info', `Sending message to model: ${targetModelId}`);
+      this.logger.info(`Sending message to model: ${targetModelId} (Session: ${session.id})`);
       const response = await this.client.completeChat(requestOptions);
       const content = response.choices?.[0]?.message?.content || '';
       const usage = response.usage;
 
-      // Record usage statistics
+      // Add agent response to session
+      if (content) {
+        this.sessionManager.addMessage('agent', 'assistant', content);
+      }
+
+      // Record usage statistics with token tracking by type
       if (usage && this.statsManager) {
-        await this.statsManager.recordChatUsage(usage);
+        await this.statsManager.recordChatUsage(usage, targetModelId);
+        
+        // Update session token usage by type
+        if (usage.prompt_tokens && usage.completion_tokens) {
+          const promptTokens = usage.prompt_tokens;
+          const completionTokens = usage.completion_tokens;
+          
+          // Add agent response tokens
+          this.sessionManager.updateTokenUsage('agent', 0, completionTokens);
+          
+          // Estimate input tokens distribution
+          this.sessionManager.updateTokenUsage('user', Math.floor(promptTokens * 0.6), 0);
+          this.sessionManager.updateTokenUsage('prompt', Math.floor(promptTokens * 0.2), 0);
+          this.sessionManager.updateTokenUsage('context', Math.floor(promptTokens * 0.2), 0);
+        }
       }
 
       return { content, usage };
     } catch (error) {
-      this.log('error', `Failed to send message: ${error}`);
+      this.logger.error(`Failed to send message: ${error}`);
       throw error;
     }
   }
@@ -1277,7 +1417,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     text: string,
     modelId: string | undefined,
     onChunk: (chunk: { content?: string; done?: boolean; usage?: any; cancelled?: boolean }) => void,
-    cancellationToken?: vscode.CancellationToken
+    cancellationToken?: vscode.CancellationToken,
+    sessionId?: string
   ): Promise<void> {
     await this.initializationPromise;
 
@@ -1289,11 +1430,60 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       throw new Error('No model selected. Please select a model from the dropdown.');
     }
 
-    // Build the request
-    const messages = [{ role: 'user', content: text }];
+    // Get or create session
+    let session: ChatSession | null = null;
+    let isNewSession = false;
+    if (sessionId) {
+      session = this.sessionManager['sessions'].get(sessionId) || null;
+    } else {
+      session = this.sessionManager.getActiveSession();
+    }
+    
+    if (!session) {
+      session = this.sessionManager.createSession(targetModelId);
+      isNewSession = true;
+      this.logger.info(`Created new chat session: ${session.id}`);
+    }
+
+    // Add user message to session
+    this.sessionManager.addMessage('user', 'user', text);
+
+    // Generate session title if this is a new session (after first user message)
+    if (isNewSession) {
+      // Fire and forget - don't await to avoid blocking the response
+      this.generateSessionTitle(text, session.id).catch(err => {
+        this.logger.error(`Failed to generate session title: ${err}`);
+      });
+    }
+
+    // Build the request with conversation history
+    const openAIMessages: Record<string, unknown>[] = [];
+    
+    // Add master prompt if it's the first message
+    const masterPrompt = this.sessionManager.getMasterPrompt();
+    if (session.messages.length <= 1 && masterPrompt) {
+      openAIMessages.push({ role: 'system', content: masterPrompt, messageType: 'prompt' });
+    }
+
+    // Add conversation history from session
+    for (const msg of session.messages) {
+      if (msg.role === 'system' && msg.type === 'prompt') {
+        // Skip if we already added the master prompt
+        if (openAIMessages.length === 0 || openAIMessages[0].role !== 'system') {
+          openAIMessages.push({ role: 'system', content: msg.content, messageType: 'prompt' });
+        }
+      } else {
+        openAIMessages.push({ 
+          role: msg.role, 
+          content: msg.content,
+          messageType: msg.type
+        });
+      }
+    }
+
     const requestOptions: any = {
       model: targetModelId,
-      messages: messages,
+      messages: openAIMessages,
       max_tokens: this.config.defaultMaxOutputTokens || 2048,
       temperature: 0.7,
       stream: true,
@@ -1312,11 +1502,12 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
 
     try {
-      this.log('info', `Streaming message to model: ${targetModelId}`);
+      this.logger.info(`Streaming message to model: ${targetModelId} (Session: ${session.id})`);
       
       let fullContent = '';
       let wasCancelled = false;
       let doneSent = false;
+      let finalUsage: any = null;
       
       // Use provided cancellation token or create a dummy one
       const token = cancellationToken || { isCancellationRequested: false, onCancelled: () => {} } as any;
@@ -1324,7 +1515,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
         // Check for cancellation at the start of each iteration
         if (token.isCancellationRequested) {
-          this.log('info', 'Streaming cancelled by user (detected in loop)');
+          this.logger.info('Streaming cancelled by user (detected in loop)');
           wasCancelled = true;
           break;
         }
@@ -1336,6 +1527,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         
         // Check if usage is included in the chunk (final chunk)
         if (chunk.usage) {
+          finalUsage = chunk.usage;
           onChunk({ usage: chunk.usage, done: true });
           doneSent = true;
         }
@@ -1347,18 +1539,112 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
       
       if (wasCancelled) {
-        this.log('info', 'Calling onChunk with cancelled=true');
+        this.logger.info('Calling onChunk with cancelled=true');
         onChunk({ done: true, cancelled: true });
       } else if (!doneSent) {
         // Stream ended normally - send done message if not already sent with usage
-        this.log('info', 'Streaming complete, sending done message');
+        this.logger.info('Streaming complete, sending done message');
         onChunk({ done: true });
       }
       
-      this.log('info', `Streaming complete, total length: ${fullContent.length}`);
+      // Add agent response to session if we have content
+      if (fullContent && !wasCancelled) {
+        this.sessionManager.addMessage('agent', 'assistant', fullContent);
+      }
+
+      // Record usage statistics with token tracking by type
+      if (finalUsage && this.statsManager) {
+        await this.statsManager.recordChatUsage(finalUsage, targetModelId);
+        
+        // Update session token usage by type
+        if (finalUsage.prompt_tokens && finalUsage.completion_tokens) {
+          const promptTokens = finalUsage.prompt_tokens;
+          const completionTokens = finalUsage.completion_tokens;
+          
+          // Add agent response tokens
+          this.sessionManager.updateTokenUsage('agent', 0, completionTokens);
+          
+          // Estimate input tokens distribution
+          this.sessionManager.updateTokenUsage('user', Math.floor(promptTokens * 0.6), 0);
+          this.sessionManager.updateTokenUsage('prompt', Math.floor(promptTokens * 0.2), 0);
+          this.sessionManager.updateTokenUsage('context', Math.floor(promptTokens * 0.2), 0);
+        }
+      }
+      
+      this.logger.info(`Streaming complete, total length: ${fullContent.length}`);
     } catch (error) {
-      this.log('error', `Failed to stream message: ${error}`);
+      this.logger.error(`Failed to stream message: ${error}`);
       throw error;
+    }
+  }
+
+  /**
+   * Generate a session title using the small model (or default model as fallback)
+   * @param firstMessage The first user message to summarize
+   * @param sessionId The session ID to update with the generated title
+   */
+  public async generateSessionTitle(firstMessage: string, sessionId: string): Promise<void> {
+    await this.initializationPromise;
+    
+    // Get the small model from config, fall back to default model
+    const config = vscode.workspace.getConfiguration('local.model.provider');
+    const smallModelId = config.get<string>('smallModel', '');
+    const targetModelId = smallModelId || config.get<string>('defaultModel', '');
+    
+    if (!targetModelId) {
+      this.logger.warn('No model available for title generation, keeping default title');
+      return;
+    }
+
+    this.logger.info(`Generating session title using model: ${targetModelId} (smallModel: ${smallModelId || 'none'})`);
+
+    // Get custom summary prompt template or use default
+    let summaryPrompt = `Provide a concise title (10 words or less) for a conversation that starts with this message: "${firstMessage}"`;
+    
+    const workspaceRoot = this.getWorkspaceRoot();
+    if (workspaceRoot) {
+      const customTemplatePath = path.join(workspaceRoot, '.llm', 'session.summary.md');
+      try {
+        if (fs.existsSync(customTemplatePath)) {
+          let template = fs.readFileSync(customTemplatePath, 'utf-8');
+          // Replace placeholder with the actual message
+          summaryPrompt = template.replace(/\{\{message\}\}/g, firstMessage);
+          this.logger.info(`Using custom summary template from ${customTemplatePath}`);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to read custom summary template: ${error}`);
+      }
+    }
+
+    // Build the request for title generation
+    const requestOptions: any = {
+      model: targetModelId,
+      messages: [
+        { role: 'user', content: summaryPrompt }
+      ],
+      max_tokens: 50, // Short response for title
+      temperature: 0, // Deterministic output
+      stream: false
+    };
+
+    try {
+      const response = await this.client.completeChat(requestOptions);
+      let title = response.choices?.[0]?.message?.content || '';
+      
+      // Clean up the title (remove quotes, trim, limit length)
+      title = title.replace(/^["']|["']$/g, '').trim();
+      if (title.length > 50) {
+        title = title.substring(0, 47) + '...';
+      }
+      
+      // Update the session title
+      if (title) {
+        this.sessionManager.updateSessionTitle(sessionId, title);
+        this.logger.info(`Generated session title: "${title}"`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to generate session title: ${error}`);
+      // Keep the default title on error
     }
   }
 }

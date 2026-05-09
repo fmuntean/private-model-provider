@@ -82,6 +82,82 @@ export interface OpenAIChatCompletionResponse {
   };
 }
 
+/**
+ * Message types for chat sessions
+ */
+export type ChatMessageType = 'prompt' | 'context' | 'user' | 'agent' | 'tools';
+
+/**
+ * Token usage breakdown by message type
+ */
+export interface TokenUsageByType {
+  prompt: number;
+  context: number;
+  user: number;
+  agent: number;
+  tools: number;
+}
+
+/**
+ * Token usage for a chat session
+ */
+export interface SessionTokenUsage {
+  byType: TokenUsageByType;
+  total: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+}
+
+/**
+ * A single message in a chat session
+ */
+export interface ChatSessionMessage {
+  id: string;
+  type: ChatMessageType;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  timestamp: string;
+  modelId?: string; // Track which model generated this message (for assistant messages)
+  tokenEstimate?: number;
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>;
+  toolCallId?: string;
+}
+
+/**
+ * Chat session metadata (stored in sessions.json)
+ */
+export interface ChatSessionMetadata {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  modelId: string;
+  lastUsedModel?: string; // Track the last model used in this session
+  messageCount: number;
+  tokenUsage: SessionTokenUsage;
+}
+
+/**
+ * Full chat session with messages
+ */
+export interface ChatSession extends ChatSessionMetadata {
+  messages: ChatSessionMessage[];
+}
+
+/**
+ * Session manager events
+ */
+export interface SessionManagerEvent {
+  type: 'created' | 'deleted' | 'updated' | 'switched';
+  sessionId: string;
+}
+
 export interface GatewayConfig {
   serverUrl: string;
   apiKey?: string;
