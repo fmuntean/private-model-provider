@@ -77,8 +77,8 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                     switch (message.command) {
                         case 'webviewReady':
                             // Webview is ready, send initial data
-                            this.sendSessions();
                             this.sendModels();
+                            this.sendSessions();
                             break;
                             
                         case 'requestSessions':
@@ -92,12 +92,37 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                         case 'switchSession':
                             if (message.sessionId) {
                                 this.sessionManager.switchSession(message.sessionId);
-                                this.sendSessions(); // Refresh session list
+                                var session = this.sessionManager.getActiveSession()
+                                //this.sendSessions(); // Refresh session list
+                                this.webviewView?.webview.postMessage({
+                                        type: 'showChat',
+                                        session: session
+                                });
                             }
                             break;
                             
                         case 'sendMessage':
                             // Send message to the model
+                            if (!message.sessionId){
+                                //create a new session
+                                let session = this.sessionManager.createSession(message.modelId);
+                                message.sessionId = session.id;
+                                //create session title
+                                this.provider.generateSessionTitle(message.text,session.id).then((title)=>{
+                                    session.title = title;
+                                    this.webviewView?.webview.postMessage({
+                                        type: 'showChat',
+                                        session: session
+                                    });    
+                                })
+                            } else {
+                                this.webviewView?.webview.postMessage({
+                                    type: 'user',
+                                    content: message.text,
+                                    sessionId: message.sessionId
+                                });
+                            }
+
                             this.logger.info(`[LMP] Send message: ${message.text}`);
                             try {
                                 const result = await this.provider.sendMessage(

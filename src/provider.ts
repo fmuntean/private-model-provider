@@ -1583,7 +1583,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * @param firstMessage The first user message to summarize
    * @param sessionId The session ID to update with the generated title
    */
-  public async generateSessionTitle(firstMessage: string, sessionId: string): Promise<void> {
+  public async generateSessionTitle(firstMessage: string, sessionId: string): Promise<string> {
     await this.initializationPromise;
     
     // Get the small model from config, fall back to default model
@@ -1593,7 +1593,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     
     if (!targetModelId) {
       this.logger.warn('No model available for title generation, keeping default title');
-      return;
+      return '';
     }
 
     this.logger.info(`Generating session title using model: ${targetModelId} (smallModel: ${smallModelId || 'none'})`);
@@ -1641,6 +1641,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       if (title) {
         this.sessionManager.updateSessionTitle(sessionId, title);
         this.logger.info(`Generated session title: "${title}"`);
+        return title;
       }
     } catch (error) {
       this.logger.error(`Failed to generate session title: ${error}`);

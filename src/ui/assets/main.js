@@ -44,14 +44,7 @@ sendBtn.addEventListener('click', () => {
     if (!text) return;
     log('info', `Send button clicked with text: ${text.substring(0, 50)}...`);
     
-    // Add user message to chat container
-    if (chatContainer) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message user-message';
-        messageDiv.textContent = text;
-        chatContainer.appendChild(messageDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
+    
     
     userInput.value = '';
     // Send message to extension
@@ -96,7 +89,7 @@ function renderSessionList(sessions, activeSessionId) {
         if (session.id === activeSessionId) {
             div.classList.add('active');
         }
-        div.textContent = session.title || 'New Chat';
+        div.textContent = session.title || session.id || 'New Chat';
         div.onclick = () => {
             userSelectedSession = true;
             currentSessionId = session.id;
@@ -113,10 +106,10 @@ function renderSessionList(sessions, activeSessionId) {
 }
 
 // Render chat view in #top-area
-function renderChatView(sessionId, sessionTitle) {
+function renderChatView(session) {
     if (!topArea) return;
     
-    log('info', `Rendering chat view for session: ${sessionId}`);
+    log('info', `Rendering chat view for session: ${session.id}`);
     topArea.innerHTML = '';
     
     // Header with back button and title
@@ -124,15 +117,18 @@ function renderChatView(sessionId, sessionTitle) {
     header.id = 'chat-header';
     
     const backBtn = document.createElement('button');
-    backBtn.textContent = '← Back';
+    backBtn.textContent = '←'; //Back to sessions
+    backBtn.id='back-btn';
     backBtn.onclick = () => {
+        currentSessionId = undefined;
+        userSelectedSession = false;
         vscode.postMessage({ command: 'requestSessions' });
     };
     header.appendChild(backBtn);
     
     const title = document.createElement('div');
     title.id = 'session-title';
-    title.textContent = sessionTitle || 'New Chat';
+    title.textContent = session.title || 'New Chat';
     header.appendChild(title);
     topArea.appendChild(header);
     
@@ -142,7 +138,27 @@ function renderChatView(sessionId, sessionTitle) {
     topArea.appendChild(chatDiv);
     chatContainer = chatDiv;
     
-    currentSessionId = sessionId;
+    // Render all messages in the chat container
+    session.messages.forEach(msg => {
+        const messageDiv = document.createElement('div');
+        // Assign class based on sender
+        if (msg.role === 'assistant' || msg.sender === 'assistant') {
+            messageDiv.className = 'message agent';
+        } else if (msg.role === 'user' || msg.sender === 'user') {
+            messageDiv.className = 'message user';
+        } else if (msg.role === 'system'){
+            messageDiv.className = 'message prompt';
+        }else {
+            messageDiv.className = 'message error';
+        }
+        // Set content, escaping if necessary
+        messageDiv.textContent = msg.content || '';
+        chatContainer.appendChild(messageDiv);
+    });
+    // Ensure the latest messages are visible
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+
+    currentSessionId = session.id;
 }
 
 // Receive messages from extension
@@ -181,12 +197,14 @@ window.addEventListener('message', event => {
     
     if (msg.type === 'showChat') {
         // Show chat view for a session (explicit request)
+        /*
         if (!userSelectedSession) {
             log('info', 'Ignoring showChat - user has not selected a session yet');
             console.log('[LMP] Ignoring showChat, userSelectedSession =', userSelectedSession);
             return;
         }
-        renderChatView(msg.sessionId, msg.sessionTitle);
+        */
+        renderChatView(msg.session);
     }
     
     if (msg.type === 'messageResponse') {
@@ -196,6 +214,17 @@ window.addEventListener('message', event => {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message assistant-message';
             messageDiv.textContent = msg.content;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    }
+
+    if (msg.type == 'user'){
+        // Add user message to chat container
+        if (chatContainer) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user-message';
+            messageDiv.textContent = text;
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
