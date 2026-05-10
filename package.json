@@ -230,12 +230,6 @@
           "description": "Presence penalty to encourage talking about new topics.",
           "order": 13
         },
-        "local.model.provider.systemPromptOverride": {
-          "type": "string",
-          "default": "",
-          "description": "Override the system prompt sent to the LLM. If empty, the default prompt is used.",
-          "order": 14
-        },
         "local.model.provider.maxRetries": {
           "type": "number",
           "default": 3,
@@ -262,7 +256,7 @@
         },
         "local.model.provider.logLevel": {
           "type": "string",
-          "default": "info",
+          "default": "warn",
           "enum": [
             "debug",
             "info",

@@ -937,16 +937,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    // If a system prompt override is configured, prepend it as the first message
-    const systemPrompt = vscode.workspace.getConfiguration('local.model.provider').get<string>('systemPromptOverride', '').trim();
-    if (systemPrompt && !masterPrompt) {
-      openAIMessages.push({ role: 'system', content: systemPrompt, messageType: 'prompt' });
-      this.logger.debug('Added system prompt override to request');
-    }
 
     // Convert VS Code messages to OpenAI format and add to session
+    // Determine the starting index for message conversion. If a master prompt was added
+    // and the first message in the conversation is a system role (role value 3),
+    // skip that message to avoid duplication.
     let startIdx = 0;
-    if ((systemPrompt || masterPrompt) && messages.length > 0) {
+    if (masterPrompt && messages.length > 0) {
       const firstMsg = messages[0];
       // @ts-ignore – checking for system role
       if (firstMsg.role === 3) {

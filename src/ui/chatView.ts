@@ -115,14 +115,14 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                                         session: session
                                     });    
                                 })
-                            } else {
-                                this.webviewView?.webview.postMessage({
-                                    type: 'user',
-                                    content: message.text,
-                                    sessionId: message.sessionId
-                                });
-                            }
-
+                            } 
+                            
+                            this.webviewView?.webview.postMessage({
+                                type: 'user',
+                                content: message.text,
+                                sessionId: message.sessionId
+                            });
+                            
                             this.logger.info(`[LMP] Send message: ${message.text}`);
                             try {
                                 const result = await this.provider.sendMessage(

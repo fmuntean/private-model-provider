@@ -193,7 +193,7 @@ export class SessionManager implements vscode.Disposable {
       const aiLogsDir = path.dirname(this.sessionsMetadataFile);
       
       this.logger.info(`[SessionManager] saveSessionMessages() called for session: ${session.id}`);
-      this.logger.info(`[SessionManager] Using ai-logs directory: ${aiLogsDir}`);
+      this.logger.debug(`[SessionManager] Using ai-logs directory: ${aiLogsDir}`);
       
       // Ensure ai-logs directory exists
       if (!fs.existsSync(aiLogsDir)) {
@@ -441,14 +441,8 @@ export class SessionManager implements vscode.Disposable {
       }
 
       // Fallback to config override
-      const configPrompt = vscode.workspace.getConfiguration('local.model.provider')
-        .get<string>('systemPromptOverride', '').trim();
-      
-      if (configPrompt) {
-        this.logger.info('[SessionManager] Using system prompt override from config');
-      }
-      
-      return configPrompt || null;
+      // No system prompt override configuration is supported; return null
+      return null;
     } catch (error) {
       this.logger.error('[SessionManager] Failed to load master prompt:', error);
       return null;
