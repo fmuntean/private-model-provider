@@ -1,4 +1,65 @@
 /**
+ * Centralized type definitions for the extension.
+ * These types are used across the webview, extension, and provider code.
+ */
+
+/**
+ * Message sent from the webview to the extension.
+ */
+export interface WebviewToExtensionMessage {
+  command: string;
+  /**
+   * Optional payload depending on the command.
+   */
+  [key: string]: any;
+}
+
+/**
+ * Message sent from the extension to the webview.
+ */
+export interface ExtensionToWebviewMessage {
+  type: string;
+  /**
+   * Payload varies by type.
+   */
+  [key: string]: any;
+}
+
+/**
+ * Configuration options for the extension.
+ */
+export interface ExtensionConfig {
+  /**
+   * The default model id to use when creating a new session.
+   */
+  defaultModelId?: string;
+  /**
+   * Maximum number of concurrent sessions.
+   */
+  maxConcurrentSessions?: number;
+  /**
+   * Whether to enable verbose logging.
+   */
+  verboseLogging?: boolean;
+}
+
+/**
+ * Representation of a chat message.
+ */
+export interface ChatMessage {
+  role: 'assistant' | 'user' | 'system';
+  content: string;
+}
+
+/**
+ * Representation of a chat session.
+ */
+export interface ChatSession {
+  id: string;
+  title?: string;
+  messages: ChatMessage[];
+}
+/**
  * Type definitions for OpenAI-compatible API responses
  */
 

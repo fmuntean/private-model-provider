@@ -33,6 +33,43 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly _onDidChangeLanguageModelChatInformation = new vscode.EventEmitter<void>();
   public readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformation.event;
 
+  
+  /**
+   * Execute a request function with exponential backoff retry logic.
+   * Retries are driven by the provider configuration: `maxRetries` and `retryDelayMs`.
+   * The delay doubles on each attempt (baseDelayMs * 2^attempt).
+   * Only retries on the specific "Model unloaded" GatewayError.
+   */
+  private async requestWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+    const maxRetries = this.config.maxRetries ?? 3;
+    const baseDelay = this.config.retryDelayMs ?? 500; // ms
+    let attempt = 0;
+    while (true) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        const isModelUnloaded = err?.message?.includes('Model unloaded');
+        if (!isModelUnloaded || attempt >= maxRetries) {
+          throw err;
+        }
+        const delay = baseDelay * Math.pow(2, attempt);
+        this.logger.warn(`Request failed with Model unloaded, retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
+        await new Promise(res => setTimeout(res, delay));
+        attempt++;
+      }
+    }
+  }
+
+  /**
+   * Track ongoing title‑generation promises per session. This prevents the
+   * provider from issuing a second title request while a previous one is still
+   * loading the model, which some inference servers treat as a cancellation of
+   * the first request (see server logs). The map stores the promise so that
+   * subsequent calls can await the existing work instead of starting a new
+   * request.
+   */
+  private readonly titlePromises: Map<string, Promise<string>> = new Map();
+
   constructor(
     private readonly context: vscode.ExtensionContext, 
     statsManager?: StatisticsManager,
@@ -1318,11 +1355,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.sessionManager.addMessage('user', 'user', text);
 
     // Generate session title if this is a new session (after first user message)
+    // NOTE: Previously this was fire‑and‑forget, which could cause two concurrent
+    // model calls (title generation + normal chat) that race on the inference
+    // server and lead to the "Failed to load model" error. We now await the
+    // title generation before proceeding with the main request to ensure the
+    // server handles one model load at a time.
     if (isNewSession) {
-      // Fire and forget - don't await to avoid blocking the response
-      this.generateSessionTitle(text, session.id).catch(err => {
+      try {
+        await this.generateSessionTitle(text, session.id);
+      } catch (err) {
         this.logger.error(`Failed to generate session title: ${err}`);
-      });
+      }
     }
 
     // Build the request with conversation history
@@ -1369,9 +1412,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       requestOptions.presence_penalty = this.config.presencePenalty;
     }
 
+    // Attach tool definitions if tool calling is enabled
+    if (this.config.enableToolCalling) {
+      // Import the definitions lazily to avoid circular deps at top of file
+      const { getToolDefinitions } = require('./tools');
+      requestOptions.tools = getToolDefinitions();
+    }
+
     try {
       this.logger.info(`Sending message to model: ${targetModelId} (Session: ${session.id})`);
-      const response = await this.client.completeChat(requestOptions);
+      // Send the request directly to the inference server using the existing client.
+      const response = await this.requestWithRetry(() => this.client.completeChat(requestOptions));
       const content = response.choices?.[0]?.message?.content || '';
       const usage = response.usage;
 
@@ -1498,6 +1549,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       requestOptions.presence_penalty = this.config.presencePenalty;
     }
 
+    // Add tooling if tool calling is enabled
+    if (this.config.enableToolCalling) {
+      // Lazy import to avoid circular dependencies
+      const { getToolDefinitions } = require('./tools');
+      requestOptions.tools = getToolDefinitions();
+    }
+    
     try {
       this.logger.info(`Streaming message to model: ${targetModelId} (Session: ${session.id})`);
       
@@ -1581,68 +1639,69 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * @param sessionId The session ID to update with the generated title
    */
   public async generateSessionTitle(firstMessage: string, sessionId: string): Promise<string> {
-    await this.initializationPromise;
-    
-    // Get the small model from config, fall back to default model
-    const config = vscode.workspace.getConfiguration('local.model.provider');
-    const smallModelId = config.get<string>('smallModel', '');
-    const targetModelId = smallModelId || config.get<string>('defaultModel', '');
-    
-    if (!targetModelId) {
-      this.logger.warn('No model available for title generation, keeping default title');
-      return '';
+    // Reuse any in‑flight title generation for this session
+    const existing = this.titlePromises.get(sessionId);
+    if (existing) {
+      this.logger.debug(`Reusing pending title generation for session ${sessionId}`);
+      return existing;
     }
 
-    this.logger.info(`Generating session title using model: ${targetModelId} (smallModel: ${smallModelId || 'none'})`);
+    const titlePromise = (async () => {
+      await this.initializationPromise;
+      const config = vscode.workspace.getConfiguration('local.model.provider');
+      const smallModelId = config.get<string>('smallModel', '');
+      const targetModelId = smallModelId || config.get<string>('defaultModel', '');
+      if (!targetModelId) {
+        this.logger.warn('No model available for title generation, keeping default title');
+        return '';
+      }
+      this.logger.info(`Generating session title using model: ${targetModelId} (smallModel: ${smallModelId || 'none'})`);
 
-    // Get custom summary prompt template or use default
-    let summaryPrompt = `Provide a concise title (10 words or less) for a conversation that starts with this message: "${firstMessage}"`;
-    
-    const workspaceRoot = this.getWorkspaceRoot();
-    if (workspaceRoot) {
-      const customTemplatePath = path.join(workspaceRoot, '.llm', 'session.summary.md');
-      try {
-        if (fs.existsSync(customTemplatePath)) {
-          let template = fs.readFileSync(customTemplatePath, 'utf-8');
-          // Replace placeholder with the actual message
-          summaryPrompt = template.replace(/\{\{message\}\}/g, firstMessage);
-          this.logger.info(`Using custom summary template from ${customTemplatePath}`);
+      // Build prompt (custom template support)
+      let summaryPrompt = `Provide a concise title (10 words or less) for a conversation that starts with this message: "${firstMessage}"`;
+      const workspaceRoot = this.getWorkspaceRoot();
+      if (workspaceRoot) {
+        const customTemplatePath = path.join(workspaceRoot, '.llm', 'session.summary.md');
+        try {
+          if (fs.existsSync(customTemplatePath)) {
+            const template = fs.readFileSync(customTemplatePath, 'utf-8');
+            summaryPrompt = template.replace(/\{\{message\}\}/g, firstMessage);
+            this.logger.info(`Using custom summary template from ${customTemplatePath}`);
+          }
+        } catch (e) {
+          this.logger.warn(`Failed to read custom summary template: ${e}`);
         }
-      } catch (error) {
-        this.logger.warn(`Failed to read custom summary template: ${error}`);
       }
-    }
 
-    // Build the request for title generation
-    const requestOptions: any = {
-      model: targetModelId,
-      messages: [
-        { role: 'user', content: summaryPrompt }
-      ],
-      max_tokens: 50, // Short response for title
-      temperature: 0, // Deterministic output
-      stream: false
-    };
+      const requestOptions: any = {
+        model: targetModelId,
+        messages: [{ role: 'user', content: summaryPrompt }],
+        max_tokens: 50,
+        temperature: 0,
+        stream: false,
+      };
 
-    try {
-      const response = await this.client.completeChat(requestOptions);
-      let title = response.choices?.[0]?.message?.content || '';
-      
-      // Clean up the title (remove quotes, trim, limit length)
-      title = title.replace(/^["']|["']$/g, '').trim();
-      if (title.length > 50) {
-        title = title.substring(0, 47) + '...';
+      try {
+        const response = await this.client.completeChat(requestOptions);
+        let title = response.choices?.[0]?.message?.content || '';
+        title = title.replace(/^['"]|['"]$/g, '').trim();
+        if (title.length > 50) {
+          title = title.substring(0, 47) + '...';
+        }
+        if (title) {
+          this.sessionManager.updateSessionTitle(sessionId, title);
+          this.logger.info(`Generated session title: "${title}"`);
+          return title;
+        }
+        return '';
+      } catch (e) {
+        this.logger.error(`Failed to generate session title: ${e}`);
+        return '';
       }
-      
-      // Update the session title
-      if (title) {
-        this.sessionManager.updateSessionTitle(sessionId, title);
-        this.logger.info(`Generated session title: "${title}"`);
-        return title;
-      }
-    } catch (error) {
-      this.logger.error(`Failed to generate session title: ${error}`);
-      // Keep the default title on error
-    }
+    })();
+
+    this.titlePromises.set(sessionId, titlePromise);
+    titlePromise.finally(() => this.titlePromises.delete(sessionId));
+    return titlePromise;
   }
 }

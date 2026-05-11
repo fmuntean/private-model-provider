@@ -1,9 +1,20 @@
 // main.js – handles session list and chat view in #top-area
 const vscode = acquireVsCodeApi();
 
-// Simple logger for webview - sends logs to extension
+/**
+ * Simple logger for the webview.  The extension can enable verbose
+ * logging via the configuration.  Errors are forwarded to the
+ * extension so they can be surfaced to the user.
+ * @param {string} level - One of 'debug', 'info', 'warn', 'error'.
+ * @param {string} message - The message to log.
+ */
 function log(level, message) {
-  vscode.postMessage({ command: 'log', level, message: `[LMP] ${message}` });
+    try {
+        vscode.postMessage({ command: 'log', level, message: `[LMP] ${message}` });
+    } catch (e) {
+        // If the extension is not ready, fall back to console
+        console[level === 'error' ? 'error' : 'log'](`[LMP] ${message}`);
+    }
 }
 
 // UI Elements
@@ -43,9 +54,6 @@ sendBtn.addEventListener('click', () => {
     const text = userInput.value.trim();
     if (!text) return;
     log('info', `Send button clicked with text: ${text.substring(0, 50)}...`);
-    
-    
-    
     userInput.value = '';
     // Send message to extension
     vscode.postMessage({
@@ -212,9 +220,11 @@ window.addEventListener('message', event => {
         log('info', `Received message response: ${msg.content?.substring(0, 50)}...`);
         if (chatContainer) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = 'message assistant-message';
+            messageDiv.className = 'message agent';
             messageDiv.textContent = msg.content;
             chatContainer.appendChild(messageDiv);
+            // Ensure the new message is visible
+            messageDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
     }
@@ -223,9 +233,11 @@ window.addEventListener('message', event => {
         // Add user message to chat container
         if (chatContainer) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = 'message user-message';
-            messageDiv.textContent = text;
+            messageDiv.className = 'message user';
+            messageDiv.textContent = msg.content;
             chatContainer.appendChild(messageDiv);
+            // Ensure the new message is visible
+            messageDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
     }
