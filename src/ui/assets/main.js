@@ -229,6 +229,62 @@ window.addEventListener('message', event => {
         }
     }
 
+    // New streaming chunk handling
+    if (msg.type === 'messageChunk') {
+        // Append incremental content to the last assistant message or create one
+        if (!chatContainer) return;
+        // Find the last assistant message element, or create a new one if none
+        let lastAgentMsg = chatContainer.querySelector('.message.agent:last-child');
+        if (!lastAgentMsg) {
+            lastAgentMsg = document.createElement('div');
+            lastAgentMsg.className = 'message agent';
+            lastAgentMsg.textContent = '';
+            chatContainer.appendChild(lastAgentMsg);
+        }
+        // Append the new chunk
+        lastAgentMsg.textContent += msg.content || '';
+        // Scroll into view
+        lastAgentMsg.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    if (msg.type === 'messageDone') {
+        // Finalize the streaming response, optionally show usage or cancellation info
+        if (!chatContainer) return;
+        // Ensure a final newline or spacing
+        const lastAgentMsg = chatContainer.querySelector('.message.agent:last-child');
+        if (lastAgentMsg && msg.usage) {
+            const usageDiv = document.createElement('div');
+            usageDiv.className = 'usage-info';
+            usageDiv.textContent = `Tokens used: ${msg.usage.total_tokens || ''}`;
+            lastAgentMsg.appendChild(usageDiv);
+        }
+        if (msg.cancelled) {
+            const cancelDiv = document.createElement('div');
+            cancelDiv.className = 'cancel-info';
+            cancelDiv.textContent = '(generation cancelled)';
+            chatContainer.appendChild(cancelDiv);
+        }
+        // Scroll to bottom after done
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    // Handle tool call requests from the extension
+    if (msg.type === 'toolCall') {
+        if (!chatContainer) return;
+        const { name, arguments: args, toolCallId } = msg;
+        // Display the tool call information for the user to see, but do not request a result.
+        const toolDiv = document.createElement('div');
+        toolDiv.className = 'tool-call';
+        toolDiv.dataset.toolCallId = toolCallId;
+        toolDiv.innerHTML = `<div class="tool-name">Tool: ${name}</div>` +
+            `<pre class="tool-args">${JSON.stringify(args, null, 2)}</pre>` +
+            `<div class="tool-info">Executing automatically…</div>`;
+        chatContainer.appendChild(toolDiv);
+        toolDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        // No input field or submit button – the extension runs the tool and will send the result back automatically.
+    }
+
     if (msg.type == 'user'){
         // Add user message to chat container
         if (chatContainer) {
@@ -247,7 +303,7 @@ window.addEventListener('message', event => {
         log('error', `Message error: ${msg.error}`);
         if (chatContainer) {
             const errorDiv = document.createElement('div');
-            errorDiv.className = 'message error-message';
+            errorDiv.className = 'message error';
             errorDiv.textContent = `Error: ${msg.error}`;
             chatContainer.appendChild(errorDiv);
         }

@@ -17,16 +17,51 @@ import * as vscode from 'vscode';
  * @returns        A promise that resolves with the tool's result.
  */
 export async function runCopilotTool<T>(toolName: string, args: any): Promise<T> {
-    // Ensure the Copilot extension is activated before we call its commands.
-    const copilotExt = vscode.extensions.getExtension('GitHub.copilot');
-    if (!copilotExt) {
-        throw new Error('GitHub Copilot extension is not installed.');
+    // Try to activate the Copilot extension if it exists. In some environments the
+    // extension may be present but not yet activated, causing `getExtension` to
+    // return undefined. We fall back to executing the command directly – VS Code
+    // will queue the command until the extension activates.
+    const extensionId = 'GitHub.copilot';
+    const copilotExt = vscode.extensions.getExtension(extensionId);
+    if (copilotExt) {
+        try {
+            await copilotExt.activate();
+        } catch (e) {
+            // Activation failed – log but continue to attempt the command.
+            console.warn(`[LMP] Failed to activate ${extensionId}: ${e}`);
+        }
+    } else {
+        // Extension not found – still attempt the command; VS Code may have the
+        // command registered via another source (e.g., built‑in).
+        console.warn(`[LMP] Copilot extension ${extensionId} not found; attempting command directly.`);
     }
-    await copilotExt.activate();
 
     const commandId = `copilot.runTool.${toolName}`;
     // The command returns whatever the underlying tool resolves to.
     return vscode.commands.executeCommand<T>(commandId, args);
+}
+
+/**
+ * Execute a shell command locally and capture its output.
+ * This is a simple fallback used when the Copilot runInTerminal tool is unavailable.
+ * It runs the command synchronously (via exec) and returns an object containing
+ * `stdout`, `stderr` and the exit `code`.
+ */
+export async function runInTerminalLocal(command: string, options?: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string; code: number }> {
+    const { exec } = await import('child_process');
+    // On Windows we want to run the command in PowerShell to support its syntax.
+    //const isWin = process.platform === 'win32';
+    const execCommand = `pwsh -NoProfile -Command "${command.replace(/"/g, '\"')}"`;
+    return new Promise((resolve, reject) => {
+        exec(execCommand, { cwd: options?.cwd, timeout: options?.timeout }, (error, stdout, stderr) => {
+            if (error) {
+                // error.code may be undefined; default to 1
+                resolve({ stdout, stderr, code: (error as any).code ?? 1 });
+            } else {
+                resolve({ stdout, stderr, code: 0 });
+            }
+        });
+    });
 }
 
 /** Read a portion of a file. */

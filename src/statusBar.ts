@@ -180,6 +180,10 @@ export class StatusBarManager implements vscode.Disposable {
       },
       { label: '', kind: vscode.QuickPickItemKind.Separator },
       {
+        label: '$(sparkles) Generate System Prompts',
+        description: 'Generate optimized prompts for current model',
+      },
+      {
         label: '$(gear) Open Settings',
         description: 'Configure Local Model Provider settings',
       },
@@ -209,6 +213,8 @@ export class StatusBarManager implements vscode.Disposable {
       vscode.commands.executeCommand('local-model-provider.showStats');
     } else if (selected.label.includes('Refresh Models')) {
       vscode.commands.executeCommand('local-model-provider.refreshModels');
+    } else if (selected.label.includes('Generate System Prompts')) {
+      vscode.commands.executeCommand('local-model-provider.generateSystemPrompts');
     } else if (selected.label.includes('Open Settings')) {
       vscode.commands.executeCommand(
         'workbench.action.openSettings',

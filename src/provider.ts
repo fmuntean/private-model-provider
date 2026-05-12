@@ -9,6 +9,7 @@ import { getLogger, Logger } from './logger';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { runCopilotTool } from './tools';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
@@ -69,6 +70,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * request.
    */
   private readonly titlePromises: Map<string, Promise<string>> = new Map();
+  // Map of pending tool call IDs to the progress reporter that can receive the result
+  private readonly pendingToolCalls: Map<string, vscode.Progress<vscode.LanguageModelResponsePart>> = new Map();
 
   constructor(
     private readonly context: vscode.ExtensionContext, 
@@ -633,6 +636,52 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Execute a tool by name with the given arguments using the Copilot tool runner.
+   * Returns the raw result from the tool (usually a JSON‑serialisable object).
+   */
+  private async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    // The `runCopilotTool` helper knows how to map the tool name to the VS Code command.
+    // It will throw if the tool is not available – we let the caller handle errors.
+    this.logger.info(`Executing tool "${name}" with args ${JSON.stringify(args)}`);
+    // Directly invoke the appropriate tool based on its name.
+    switch (name) {
+      case 'readFile':
+        // Expected args: filePath, startLine?, endLine?
+        return await runCopilotTool<any>('readFile', args);
+      case 'semanticSearch':
+        return await runCopilotTool<any>('semanticSearch', args);
+      case 'askQuestions':
+        return await runCopilotTool<any>('askQuestions', args);
+      case 'applyPatch':
+        return await runCopilotTool<any>('applyPatch', args);
+      case 'runInTerminal':
+        // Try Copilot sync first
+        try {
+          return await runCopilotTool<any>('runInTerminal', { ...args, mode: 'sync' });
+        } catch (e) {
+          this.logger.warn(`Copilot runInTerminal sync failed: ${e}. Using local fallback.`);
+          const { command, cwd, timeout } = args as any;
+          try {
+            // Import the local helper to execute the command and capture output
+            const { runInTerminalLocal } = await import('./tools');
+            const result = await runInTerminalLocal(command, { cwd, timeout });
+            return result;
+          } catch (localErr) {
+            this.logger.error(`Local runInTerminal also failed: ${localErr}`);
+            // Final fallback: plain VS Code terminal (no captured output)
+            const terminal = vscode.window.createTerminal({ name: `Tool: ${command}` });
+            terminal.sendText(command);
+            await new Promise(res => setTimeout(res, 500));
+            return { status: 'sent', command };
+          }
+        }
+      default:
+        this.logger.warn(`Tool "${name}" is not recognized – falling back to generic execution`);
+        return await runCopilotTool<any>(name, args);
+    }
+  }
+
+  /**
    * Provide language model information - fetches available models from inference server
    */
   async provideLanguageModelChatInformation(
@@ -822,21 +871,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private processToolCall(
     toolCall: { id: string; name: string; arguments: string },
     progress: vscode.Progress<vscode.LanguageModelResponsePart>
-  ): void {
+  ): Record<string, unknown> {
     this.logger.info(`\n=== TOOL CALL RECEIVED ===`);
     this.logger.info(`  ID: ${toolCall.id}`);
     this.logger.info(`  Name: ${toolCall.name}`);
     this.logger.debug(`  Raw arguments: ${toolCall.arguments.substring(0, 1000)}${toolCall.arguments.length > 1000 ? '...' : ''}`);
-
+    // Parse arguments with repair capability
     let args = this.tryRepairJson(toolCall.arguments) as Record<string, unknown> | null;
 
     if (args === null) {
       this.logger.error(`  ERROR: Failed to parse tool call arguments`);
-      this.logger.debug(`  Full arguments: ${toolCall.arguments}`);
-      args = {};
-    } else {
-      const argKeys = Object.keys(args);
-      this.logger.debug(`  Parsed argument keys: ${argKeys.length > 0 ? argKeys.join(', ') : '(none)'}`);
+          const parsedArgs = this.processToolCall(toolCall, progress);
+          // Persist tool call as a session message for visibility and later replay
+          try {
+            this.sessionManager.addMessage('tools', 'tool', JSON.stringify({ name: toolCall.name, arguments: parsedArgs }), { toolCallId: toolCall.id, toolCalls: [{ id: toolCall.id, name: toolCall.name, arguments: toolCall.arguments }], modelId: model.id });
+          } catch (e) {
+            this.logger.error(`Failed to persist tool call in session: ${e}`);
+          }
     }
 
     const toolSchema = this.currentToolSchemas.get(toolCall.name) as Record<string, unknown> | undefined;
@@ -846,6 +897,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     this.logger.info(`=== END TOOL CALL ===\n`);
     progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args));
+
+    // Return the parsed/final arguments so callers can persist the tool call
+    return args as Record<string, unknown>;
   }
 
   /**
@@ -1566,27 +1620,91 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       
       // Use provided cancellation token or create a dummy one
       const token = cancellationToken || { isCancellationRequested: false, onCancelled: () => {} } as any;
-      
+
+      // Progress reporter that forwards language model parts back to the webview
+      const progressReporter: vscode.Progress<vscode.LanguageModelResponsePart> = {
+        report: (part: vscode.LanguageModelResponsePart) => {
+          try {
+            const anyPart = part as any;
+            // Tool call (assistant -> function)
+            if (anyPart && typeof anyPart.callId === 'string' && 'name' in anyPart) {
+              onChunk({
+                type: 'toolCall',
+                id: anyPart.callId,
+                name: anyPart.name,
+                arguments: anyPart.arguments || anyPart.input || anyPart.function?.arguments || ''
+              });
+              return;
+            }
+
+            // Tool result (function -> assistant)
+            if (anyPart && typeof anyPart.callId === 'string' && 'content' in anyPart) {
+              const content = typeof anyPart.content === 'string' ? anyPart.content : JSON.stringify(anyPart.content);
+              onChunk({ content });
+              return;
+            }
+
+            // Text part
+            if (anyPart && 'value' in anyPart) {
+              onChunk({ content: String(anyPart.value) });
+              return;
+            }
+          } catch (e) {
+            this.logger.error(`progressReporter.report failed: ${e}`);
+          }
+        }
+      };
+
       for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
-        // Check for cancellation at the start of each iteration
-        if (token.isCancellationRequested) {
-          this.logger.info('Streaming cancelled by user (detected in loop)');
-          wasCancelled = true;
-          break;
+          // Check for cancellation at the start of each iteration
+          if (token.isCancellationRequested) {
+            this.logger.info('Streaming cancelled by user (detected in loop)');
+            wasCancelled = true;
+            break;
+          }
+          
+          // Forward normal content chunks
+          if (chunk.content) {
+            fullContent += chunk.content;
+            onChunk({ content: chunk.content });
+          }
+          
+          // Forward tool calls if present and execute them automatically
+          if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
+            for (const toolCall of chunk.finished_tool_calls) {
+              // Store the progress reporter so we can later send the result back (kept for compatibility)
+              this.pendingToolCalls.set(toolCall.id, progressReporter);
+              // Parse arguments and report the tool call part to the UI
+              const parsedArgs = this.processToolCall(toolCall, progressReporter);
+              // Persist the tool call into the session for logging
+              try {
+                this.sessionManager.addMessage('tools', 'tool', JSON.stringify({ name: toolCall.name, arguments: parsedArgs }), { toolCallId: toolCall.id, toolCalls: [{ id: toolCall.id, name: toolCall.name, arguments: toolCall.arguments }], modelId: targetModelId });
+              } catch (e) {
+                this.logger.error(`Failed to persist streaming tool call in session: ${e}`);
+              }
+              // Execute the tool automatically and send the result back to the model
+              try {
+                const toolResult = await this.executeTool(toolCall.name, parsedArgs);
+                // Report the result back via the same progress reporter
+                progressReporter.report(new vscode.LanguageModelToolResultPart(toolCall.id, toolResult as any));
+                // Clean up pending map
+                this.pendingToolCalls.delete(toolCall.id);
+              } catch (e) {
+                this.logger.error(`Tool execution failed for ${toolCall.name}: ${e}`);
+                // Still report an empty result to avoid hanging the stream
+                progressReporter.report(new vscode.LanguageModelToolResultPart(toolCall.id, {} as any));
+                this.pendingToolCalls.delete(toolCall.id);
+              }
+            }
+          }
+          
+          // Check if usage is included in the chunk (final chunk)
+          if (chunk.usage) {
+            finalUsage = chunk.usage;
+            onChunk({ usage: chunk.usage, done: true });
+            doneSent = true;
+          }
         }
-        
-        if (chunk.content) {
-          fullContent += chunk.content;
-          onChunk({ content: chunk.content });
-        }
-        
-        // Check if usage is included in the chunk (final chunk)
-        if (chunk.usage) {
-          finalUsage = chunk.usage;
-          onChunk({ usage: chunk.usage, done: true });
-          doneSent = true;
-        }
-      }
       
       // Check if cancellation was requested (might not have been detected in loop if stream ended)
       if (token.isCancellationRequested) {
@@ -1631,6 +1749,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.logger.error(`Failed to stream message: ${error}`);
       throw error;
     }
+  }
+
+  /**
+   * Called by the webview when the user provides a result for a tool call.
+   * It looks up the stored progress reporter for the given toolCallId and
+   * reports the result back to the language model stream so the provider can
+   * continue processing.
+   */
+  public receiveToolResult(toolCallId: string, result: unknown): void {
+    const progress = this.pendingToolCalls.get(toolCallId);
+    if (!progress) {
+      this.logger.warn(`Received tool result for unknown toolCallId ${toolCallId}`);
+      return;
+    }
+    // Report the tool result back to the model stream
+    try {
+      progress.report(new vscode.LanguageModelToolResultPart(toolCallId, result as any));
+    } catch (e) {
+      this.logger.error(`Failed to report tool result for ${toolCallId}: ${e}`);
+    }
+    // Clean up the pending entry
+    this.pendingToolCalls.delete(toolCallId);
   }
 
   /**

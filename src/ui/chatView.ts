@@ -125,22 +125,46 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                             
                             this.logger.info(`[LMP] Send message: ${message.text}`);
                             try {
-                                const result = await this.provider.sendMessage(
+                                // Use streaming API to send incremental chunks to the webview
+                                await this.provider.streamMessage(
                                     message.text,
                                     message.model,
+                                    async (chunk) => {
+                                        // Forward each chunk to the webview as it arrives
+                                        if (!this.webviewView) return;
+                                        // Handle tool call events specially
+                                        if (chunk.type === 'toolCall') {
+                                            this.webviewView.webview.postMessage({
+                                                type: 'toolCall',
+                                                name: chunk.name,
+                                                arguments: chunk.arguments,
+                                                toolCallId: chunk.id,
+                                                sessionId: message.sessionId
+                                            });
+                                            return;
+                                        }
+                                        if (chunk.content) {
+                                            this.webviewView.webview.postMessage({
+                                                type: 'messageChunk',
+                                                content: chunk.content,
+                                                sessionId: message.sessionId
+                                            });
+                                        }
+                                        if (chunk.done) {
+                                            this.webviewView.webview.postMessage({
+                                                type: 'messageDone',
+                                                usage: chunk.usage,
+                                                cancelled: !!chunk.cancelled,
+                                                sessionId: message.sessionId
+                                            });
+                                        }
+                                    },
+                                    undefined,
                                     message.sessionId
                                 );
-                                this.logger.info(`[LMP] Message sent successfully`);
-                                // Send the response back to the webview
-                                if (this.webviewView) {
-                                    this.webviewView.webview.postMessage({
-                                        type: 'messageResponse',
-                                        content: result.content,
-                                        usage: result.usage
-                                    });
-                                }
+                                this.logger.info(`[LMP] Streamed message completed`);
                             } catch (error) {
-                                this.logger.error('[LMP] Failed to send message:', error);
+                                this.logger.error('[LMP] Failed to stream message:', error);
                                 if (this.webviewView) {
                                     this.webviewView.webview.postMessage({
                                         type: 'messageError',
@@ -159,6 +183,7 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                             // Log message from webview
                             this.logger.info(`[Webview] ${message.message}`);
                             break;
+                        // Tool results are now handled automatically by the provider; no UI round‑trip needed.
                     }
                 },
                 undefined,

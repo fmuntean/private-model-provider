@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { GatewayProvider } from './provider';
 import { StatusBarManager, ServerStatus, ServerPreset } from './statusBar';
 import { StatisticsManager } from './statistics';
@@ -7,6 +8,8 @@ import { SessionManager } from './sessionManager';
 import { registerSessionView } from './ui/sessionView';
 import { registerChatView } from './ui/chatView';
 import { getLogger, Logger } from './logger';
+import { PromptManager } from './prompts';
+import { GatewayClient } from './client';
 
 /**
  * Extension activation
@@ -453,6 +456,77 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Register command to generate system prompts using PromptManager
+  const generateSystemPromptsCommand = vscode.commands.registerCommand(
+    'local-model-provider.generateSystemPrompts',
+    async () => {
+      try {
+        const logger = getLogger();
+
+        // Retrieve models
+        const models = await provider.provideLanguageModelChatInformation(
+          { silent: false },
+          new vscode.CancellationTokenSource().token
+        );
+
+        if (models.length === 0) {
+          vscode.window.showErrorMessage('No models available. Please connect to a server first.');
+          return;
+        }
+
+        const config = vscode.workspace.getConfiguration('local.model.provider');
+        const currentDefault = config.get<string>('defaultModel', '');
+        const selectedModel = models.find(m => m.id === currentDefault) || models[0];
+
+        logger.info(`[Local Model Provider] Generating prompts for model: ${selectedModel.name} (${selectedModel.id})`);
+
+        // Use PromptManager for paths and templates
+        const promptManager = new PromptManager(context);
+        const modelId = selectedModel.id;
+        const folderPath = promptManager.getModelPromptFolderPath(modelId);
+        const systemPath = promptManager.getModelPromptFilePath(modelId, 'system');
+        const titlePath = promptManager.getModelPromptFilePath(modelId, 'title');
+
+        // Check for existing prompts
+        if (fs.existsSync(systemPath) || fs.existsSync(titlePath)) {
+          const overwrite = await vscode.window.showWarningMessage(
+            'Optimized prompts already exist for this model. Do you want to overwrite them?',
+            { modal: true },
+            'Overwrite'
+          );
+          if (overwrite !== 'Overwrite') {
+            return;
+          }
+        }
+
+        // Ensure folder exists
+        promptManager.ensureModelPromptFolder(modelId);
+
+        // Read base templates via PromptManager
+        const systemTemplate = promptManager.readBasePromptTemplate('system');
+        const titleTemplate = promptManager.readBasePromptTemplate('title');
+
+        // Optimize using PromptManager's LLM helper
+        const client = (provider as any).client as GatewayClient;
+        const optimizedSystem = await promptManager.optimizePromptWithLLM(client, systemTemplate, selectedModel, 'system');
+        const optimizedTitle = await promptManager.optimizePromptWithLLM(client, titleTemplate, selectedModel, 'title');
+
+        // Save prompts
+        promptManager.saveModelPromptFile(modelId, 'system', optimizedSystem);
+        promptManager.saveModelPromptFile(modelId, 'title', optimizedTitle);
+
+        vscode.window.showInformationMessage(
+          `Optimized prompts saved for model ${selectedModel.name} in ${folderPath}`
+        );
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to generate system prompts: ${errorMessage}`);
+        const logger = getLogger();
+        logger.error(`[Local Model Provider] Failed to generate prompts: ${errorMessage}`);
+      }
+    }
+  );
+
   // Register command to show output channel
   const showOutputCommand = vscode.commands.registerCommand(
     'local-model-provider.showOutput',
@@ -467,6 +541,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(switchServerCommand);
   context.subscriptions.push(showStatsCommand);
   context.subscriptions.push(refreshModelsCommand);
+  context.subscriptions.push(generateSystemPromptsCommand);
   context.subscriptions.push(showOutputCommand);
 
   // Watch for config changes to update status bar
