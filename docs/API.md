@@ -45,7 +45,7 @@ The main provider class that implements VS Code's `LanguageModelChatProvider` in
 |--------|-------------|
 | `provideLanguageModelChatInformation()` | Fetches available models from the inference server |
 | `provideLanguageModelChatResponse()` | Handles chat completion requests with streaming |
-| `provideTokenCount()` | Estimates token count for messages |
+| `provideTokenCount()` | Estimates token count for messages using a simple ~4 characters per token heuristic (see `src/provider.ts`). |
 
 #### Key Features
 

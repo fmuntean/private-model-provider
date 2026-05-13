@@ -299,6 +299,29 @@ export class SessionManager implements vscode.Disposable {
   }
 
   /**
+   * Update the model ID for the currently active session and persist the change.
+   * This is used when the user selects a different model from the model picker
+   * after a session has already been created.
+   */
+  public setActiveSessionModel(modelId: string): void {
+    if (!this.activeSessionId) {
+      this.logger.warn('[SessionManager] No active session to set model for');
+      return;
+    }
+    const session = this.sessions.get(this.activeSessionId);
+    if (!session) {
+      this.logger.warn('[SessionManager] Active session not found in map');
+      return;
+    }
+    session.modelId = modelId;
+    session.updatedAt = new Date().toISOString();
+    this.logger.info(`[SessionManager] Updated model for session ${session.id} to ${modelId}`);
+    // Persist metadata change
+    this.saveSessionsMetadata();
+    this._onDidChangeSession.fire({ type: 'updated', sessionId: session.id });
+  }
+
+  /**
    * Delete a session
    */
   public deleteSession(sessionId: string): boolean {

@@ -56,6 +56,50 @@ export function activate(context: vscode.ExtensionContext) {
   const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
   statusBar.setStatus(ServerStatus.Unknown, { serverUrl });
 
+  // ---------------------------------------------------------------------
+  // Health‑check: verify server connectivity on activation and when the
+  // server URL changes. The check simply attempts to fetch the model list.
+  // ---------------------------------------------------------------------
+  const runHealthCheck = async () => {
+    try {
+      // Silent request – we only care about success/failure
+      const models = await provider.provideLanguageModelChatInformation(
+        { silent: true },
+        new vscode.CancellationTokenSource().token
+      );
+      const modelCount = models.length;
+      statusBar.setStatus(ServerStatus.Connected, { modelCount, serverUrl });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      statusBar.setStatus(ServerStatus.Error, { errorMessage: msg, serverUrl });
+    }
+  };
+
+  // Initial health check
+  runHealthCheck();
+
+  // Re‑run health check when the server URL changes
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('local.model.provider.serverUrl')) {
+        const newUrl = vscode.workspace
+          .getConfiguration('local.model.provider')
+          .get<string>('serverUrl', 'http://localhost:8000');
+        statusBar.setStatus(ServerStatus.Unknown, { serverUrl: newUrl });
+        runHealthCheck();
+      }
+      // When the default model changes, persist it to the active session
+      if (e.affectsConfiguration('local.model.provider.defaultModel')) {
+        const newModel = vscode.workspace
+          .getConfiguration('local.model.provider')
+          .get<string>('defaultModel', '');
+        if (newModel) {
+          sessionManager.setActiveSessionModel(newModel);
+        }
+      }
+    })
+  );
+
 
 
   // Register command to set API key securely
