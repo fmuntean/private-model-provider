@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -13,6 +14,7 @@ import {
   SessionManagerEvent
 } from './types';
 import { getLogger } from './logger';
+import { PromptManager } from './prompts';
 
 const SESSIONS_METADATA_FILE = 'sessions.json';
 const MASTER_PROMPT_FOLDER = '.llm';
@@ -25,12 +27,14 @@ export class SessionManager implements vscode.Disposable {
   private activeSessionId: string | null = null;
   private sessionsMetadataFile: string = '';
   private masterPromptFolder: string = '';
+  private promptManager: PromptManager;
   private readonly _onDidChangeSession = new vscode.EventEmitter<SessionManagerEvent>();
   public readonly onDidChangeSession = this._onDidChangeSession.event;
   private readonly logger = getLogger();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.initializePaths();
+    this.promptManager = new PromptManager(this.context);
     this.loadSessions();
   }
 
@@ -251,7 +255,7 @@ export class SessionManager implements vscode.Disposable {
     };
 
     // Add master prompt as the first message if available
-    const masterPrompt = this.getMasterPrompt();
+    const masterPrompt = this.promptManager.getMasterPrompt();
     if (masterPrompt) {
       const promptMessage: ChatSessionMessage = {
         id: randomUUID(),
@@ -264,6 +268,24 @@ export class SessionManager implements vscode.Disposable {
       session.messages.push(promptMessage);
       session.messageCount = 1;
       this.logger.info(`[SessionManager] Added master prompt to session ${sessionId}`);
+    }
+
+    // Load system prompt using PromptManager.getPrompt (no optimization)
+    try {
+      const systemPrompt = this.promptManager.getPrompt('system', modelId);
+      const systemMessage: ChatSessionMessage = {
+        id: randomUUID(),
+        type: 'prompt',
+        role: 'system',
+        content: systemPrompt,
+        timestamp: now,
+        modelId: modelId
+      };
+      session.messages.push(systemMessage);
+      session.messageCount += 1;
+      this.logger.info(`[SessionManager] Added system prompt to session ${sessionId}`);
+    } catch (e) {
+      this.logger.warn(`[SessionManager] Failed to load system prompt: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     this.sessions.set(sessionId, session);
@@ -428,40 +450,7 @@ export class SessionManager implements vscode.Disposable {
     this.saveSessionMessages(session);
   }
 
-  /**
-   * Get master prompt from .llm folder or config
-   */
-  public getMasterPrompt(): string | null {
-    try {
-      // First check for master.md in .llm folder
-      const masterPromptPath = path.join(this.masterPromptFolder, 'master.md');
-      if (fs.existsSync(masterPromptPath)) {
-        this.logger.info(`[SessionManager] Loading master prompt from: ${masterPromptPath}`);
-        return fs.readFileSync(masterPromptPath, 'utf-8').trim();
-      }
-
-      // Fallback to config override
-      // No system prompt override configuration is supported; return null
-      return null;
-    } catch (error) {
-      this.logger.error('[SessionManager] Failed to load master prompt:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Save master prompt to .llm folder
-   */
-  public saveMasterPrompt(content: string): void {
-    try {
-      const masterPromptPath = path.join(this.masterPromptFolder, 'master.md');
-      fs.writeFileSync(masterPromptPath, content, 'utf-8');
-      this.logger.info(`[SessionManager] Saved master prompt to: ${masterPromptPath}`);
-    } catch (error) {
-      this.logger.error('[SessionManager] Failed to save master prompt:', error);
-      throw error;
-    }
-  }
+  // Master prompt handling moved to PromptManager
 
   /**
    * Create empty token usage object

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,6 +32,41 @@ export class PromptManager {
   private getPromptsBasePath(): string {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || '';
     return path.join(workspaceFolder, '.llm', 'prompts');
+  }
+
+  /**
+   * Retrieve the master prompt from the .llm folder if it exists.
+   * Returns the trimmed content or null when not present.
+   */
+  public getMasterPrompt(): string | null {
+    try {
+      const workspaceRoot = this.getWorkspaceRoot();
+      if (!workspaceRoot) return null;
+      const masterPromptPath = path.join(workspaceRoot, '.llm', 'master.md');
+      if (fs.existsSync(masterPromptPath)) {
+        this.logger?.info(`[PromptManager] Loading master prompt from: ${masterPromptPath}`);
+        return fs.readFileSync(masterPromptPath, 'utf-8').trim();
+      }
+    } catch (error) {
+      this.logger?.error('[PromptManager] Failed to load master prompt:', error);
+    }
+    return null;
+  }
+
+  /**
+   * Save a master prompt to the .llm folder.
+   */
+  public saveMasterPrompt(content: string): void {
+    try {
+      const workspaceRoot = this.getWorkspaceRoot();
+      if (!workspaceRoot) throw new Error('Workspace root not found');
+      const masterPromptPath = path.join(workspaceRoot, '.llm', 'master.md');
+      fs.writeFileSync(masterPromptPath, content, 'utf-8');
+      this.logger?.info(`[PromptManager] Saved master prompt to: ${masterPromptPath}`);
+    } catch (error) {
+      this.logger?.error('[PromptManager] Failed to save master prompt:', error);
+      throw error;
+    }
   }
 
   /**
@@ -99,6 +135,23 @@ export class PromptManager {
     }
     
     return fs.readFileSync(templatePath, 'utf-8');
+  }
+
+  /**
+   * Retrieve a prompt of the given type for the specified model.
+   * Preference order:
+   *   1. Model‑specific prompt file (e.g., .llm/prompts/<modelId>/<type>.md)
+   *   2. Base prompt template bundled with the extension (PromptTemplates/<type>.md)
+   * If neither exists, an error is thrown.
+   */
+  public getPrompt(type: 'system' | 'title', modelId: string): string {
+    // Try model‑specific prompt first
+    if (this.hasModelPromptFile(modelId, type)) {
+      return this.readModelPromptFile(modelId, type);
+    }
+
+    // Fallback to the built‑in template
+    return this.readBasePromptTemplate(type);
   }
 
   /**

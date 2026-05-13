@@ -1017,32 +1017,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Convert messages and track them in the session
     const openAIMessages: Record<string, unknown>[] = [];
-    
-    // Add master prompt from session if it's the first message
-    const masterPrompt = this.sessionManager.getMasterPrompt();
-    if (session.messages.length === 0 && masterPrompt) {
-      const promptMessage = this.sessionManager.addMessage('prompt', 'system', masterPrompt);
-      if (promptMessage) {
-        openAIMessages.push({ role: 'system', content: masterPrompt, messageType: 'prompt' });
-        this.logger.debug('Added master prompt from session to request');
-      }
-    }
-
 
     // Convert VS Code messages to OpenAI format and add to session
-    // Determine the starting index for message conversion. If a master prompt was added
-    // and the first message in the conversation is a system role (role value 3),
-    // skip that message to avoid duplication.
-    let startIdx = 0;
-    if (masterPrompt && messages.length > 0) {
-      const firstMsg = messages[0];
-      // @ts-ignore – checking for system role
-      if (firstMsg.role === 3) {
-        startIdx = 1;
-      }
-    }
-
-    for (let i = startIdx; i < messages.length; i++) {
+    for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
       const convertedMsgs = this.convertSingleMessageWithLogging(msg);
       
@@ -1425,12 +1402,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Build the request with conversation history
     const openAIMessages: Record<string, unknown>[] = [];
     
-    // Add master prompt if it's the first message
-    const masterPrompt = this.sessionManager.getMasterPrompt();
-    if (session.messages.length <= 1 && masterPrompt) {
-      openAIMessages.push({ role: 'system', content: masterPrompt, messageType: 'prompt' });
-    }
-
     // Add conversation history from session
     for (const msg of session.messages) {
       if (msg.role === 'system' && msg.type === 'prompt') {
@@ -1561,11 +1532,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // Build the request with conversation history
     const openAIMessages: Record<string, unknown>[] = [];
     
-    // Add master prompt if it's the first message
-    const masterPrompt = this.sessionManager.getMasterPrompt();
-    if (session.messages.length <= 1 && masterPrompt) {
-      openAIMessages.push({ role: 'system', content: masterPrompt, messageType: 'prompt' });
-    }
 
     // Add conversation history from session
     for (const msg of session.messages) {

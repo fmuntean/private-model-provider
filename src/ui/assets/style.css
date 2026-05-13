@@ -250,13 +250,58 @@ body {
 }
 
 .message.prompt  {
-    max-width: 90%;
+    /* Base styling for system prompts */
+    align-self: center;
+    white-space: pre-wrap;
+    overflow: visible;
+    cursor: default;
+    transition: max-height 0.2s ease;
     box-sizing: border-box;
+    border: 1px solid var(--vscode-button-background);
+    /* Center the prompt box when expanded */
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Collapsed system prompt – hidden overflow with a fixed height */
+.message.prompt.collapsed {
+    align-self: center;
+    text-align: center;
+    max-height: 1.5em;
+    overflow: hidden;
+    cursor: pointer;
+    /* Hide original text while showing placeholder */
+    color: transparent;
+    position: relative;
+    /* Center the whole collapsed box within the chat container */
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Placeholder shown when a system prompt is collapsed */
+.message.prompt.collapsed::after {
+    content: "system prompt ...";
+    color: var(--vscode-descriptionForeground);
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    /* Center horizontally */
+    text-align: center;
+    /* Ensure it appears within the collapsed height */
+    white-space: nowrap;
+}
+
+/*
     display: block;
 
     border: 1px solid var(--vscode-button-background);
     box-sizing: border-box;
 }
+*/
+
 
 .message.user {
     /* Align the entire user message box to the right edge */

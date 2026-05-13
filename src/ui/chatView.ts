@@ -105,7 +105,7 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                             // Send message to the model
                             if (!message.sessionId){
                                 //create a new session
-                                let session = this.sessionManager.createSession(message.modelId);
+                                let session = this.sessionManager.createSession(message.model);
                                 message.sessionId = session.id;
                                 //create session title
                                 this.provider.generateSessionTitle(message.text,session.id).then((title)=>{
@@ -113,7 +113,7 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                                     this.webviewView?.webview.postMessage({
                                         type: 'showChat',
                                         session: session
-                                    });    
+                                    });
                                 })
                             } 
                             

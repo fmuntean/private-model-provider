@@ -155,8 +155,13 @@ function renderChatView(session) {
         } else if (msg.role === 'user' || msg.sender === 'user') {
             messageDiv.className = 'message user';
         } else if (msg.role === 'system'){
-            messageDiv.className = 'message prompt';
-        }else {
+            // System prompts are collapsed by default; CSS handles the styling
+            messageDiv.className = 'message prompt collapsed';
+            // Toggle expand/collapse on click by toggling the "collapsed" class
+            messageDiv.addEventListener('click', () => {
+                messageDiv.classList.toggle('collapsed');
+            });
+        } else {
             messageDiv.className = 'message error';
         }
         // Set content, escaping if necessary
@@ -234,7 +239,7 @@ window.addEventListener('message', event => {
         // Append incremental content to the last assistant message or create one
         if (!chatContainer) return;
         // Find the last assistant message element, or create a new one if none
-        let lastAgentMsg = chatContainer.querySelector('.message.agent:last-child');
+        let lastAgentMsg = chatContainer.querySelector('.message.agent:last-child, .message.prompt:last-child');
         if (!lastAgentMsg) {
             lastAgentMsg = document.createElement('div');
             lastAgentMsg.className = 'message agent';

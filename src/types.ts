@@ -46,18 +46,13 @@ export interface ExtensionConfig {
 /**
  * Representation of a chat message.
  */
-export interface ChatMessage {
-  role: 'assistant' | 'user' | 'system';
-  content: string;
-}
-
 /**
  * Representation of a chat session.
  */
 export interface ChatSession {
   id: string;
   title?: string;
-  messages: ChatMessage[];
+  messages: ChatSessionMessage[];
 }
 /**
  * Type definitions for OpenAI-compatible API responses

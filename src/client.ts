@@ -572,11 +572,14 @@ export class GatewayClient {
           console.log(line);
           const result = this.processSSELine(line, state);
           if (result) { 
-            yield result; 
+            
             // Capture and store the usage object from the current chunk's result for final yield check
             if (result.usage) {
               (state as any).lastUsage = result.usage;
+              result.usage = undefined;
             }
+
+            yield result; 
           }
         }
       }

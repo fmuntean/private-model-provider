@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SessionManager } from '../sessionManager';
 import { ChatSessionMetadata } from '../types';
+import { PromptManager } from '../prompts';
 
 /**
  * Session list item for display in the tree view
@@ -185,7 +186,8 @@ export function registerSessionView(
     }),
 
     vscode.commands.registerCommand('local-model-provider.editMasterPrompt', async () => {
-      const masterPrompt = sessionManager.getMasterPrompt() || '';
+      const promptManager = new PromptManager(context);
+      const masterPrompt = promptManager.getMasterPrompt() || '';
       
       const result = await vscode.window.showInputBox({
         prompt: 'Edit master prompt (saved to .llm/master.md)',
@@ -195,7 +197,7 @@ export function registerSessionView(
 
       if (result !== undefined) {
         try {
-          sessionManager.saveMasterPrompt(result);
+          promptManager.saveMasterPrompt(result);
           vscode.window.showInformationMessage('Master prompt saved to .llm/master.md');
         } catch (error) {
           vscode.window.showErrorMessage(`Failed to save master prompt: ${error}`);
