@@ -611,11 +611,38 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             args = {}; // Fallback to empty args
           }
 
+          // Report the tool call to the UI so the user sees the pending call
           progress.report(new vscode.LanguageModelToolCallPart(
             toolCall.id,
             toolCall.name,
             args as object
           ));
+
+          // Store a progress reporter for the eventual tool result (used elsewhere if needed)
+          this.pendingToolCalls.set(toolCall.id, progress);
+
+          // Execute the tool and report the result back to the model
+          (async () => {
+            try {
+              const result = await this.executeTool(toolCall.name, args as Record<string, unknown>);
+              // Convert result to a plain object for the tool result part
+              const resultObj = typeof result === 'object' && result !== null ? result : { value: result };
+              progress.report(new vscode.LanguageModelToolResultPart(
+                toolCall.id,
+                JSON.stringify(resultObj)
+              ));
+            } catch (e) {
+              this.logger.error(`Tool execution failed for ${toolCall.name}: ${e instanceof Error ? e.message : String(e)}`);
+              // Report an error result so the model can continue
+              progress.report(new vscode.LanguageModelToolResultPart(
+                toolCall.id,
+                JSON.stringify({ error: e instanceof Error ? e.message : String(e) })
+              ));
+            } finally {
+              // Clean up pending map
+              this.pendingToolCalls.delete(toolCall.id);
+            }
+          })();
         }
       }
     }

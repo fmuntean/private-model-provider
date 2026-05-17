@@ -126,7 +126,7 @@ The extension can automatically generate concise session titles based on the fir
 - The title is generated as a ~10 word summary of the first message
 
 ### Custom Summary Prompt
-You can customize the title generation prompt by creating a `.llm/session.summary.md` file in your workspace root:
+You can customize the title generation prompt by creating a `.llm/session.title.md` file in your workspace root or title.md under a model specific subfolder:
 
 ```markdown
 Summarize the following message in 10 words or less, focusing on the main topic:

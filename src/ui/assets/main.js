@@ -70,6 +70,39 @@ stopBtn.addEventListener('click', () => {
     vscode.postMessage({ command: 'stopRequest' });
 });
 
+// Handle model selection change
+modelSelect.addEventListener('change', () => {
+    log('info', `Model selection changed to: ${modelSelect.value}`);
+    vscode.postMessage({
+        command: 'modelSelected',
+        model: modelSelect.value
+    });
+});
+
+// Handle textarea key events - Enter sends message, Shift+Enter adds new line
+userInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        if (event.shiftKey) {
+            // Shift+Enter - add new line
+            return; // Let default behavior happen (add new line)
+        } else {
+            // Enter - send message
+            event.preventDefault(); // Prevent default new line behavior
+            const text = userInput.value.trim();
+            if (!text) return;
+            log('info', `Enter key pressed with text: ${text.substring(0, 50)}...`);
+            userInput.value = '';
+            // Send message to extension
+            vscode.postMessage({
+                command: 'sendMessage',
+                text: text,
+                model: modelSelect.value,
+                sessionId: currentSessionId
+            });
+        }
+    }
+});
+
 // Render session list in #top-area
 function renderSessionList(sessions, activeSessionId) {
     if (!topArea) return;

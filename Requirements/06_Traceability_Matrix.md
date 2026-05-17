@@ -12,7 +12,7 @@ This document maps requirements to source code components, helping verify that a
 | FR-001 | Connect to OpenAI-Compatible Servers | `src/client.ts`, `src/provider.ts` | `GatewayClient`, `GatewayProvider` | ✅ Implemented |
 | FR-002 | Model Discovery and Selection | `src/client.ts`, `src/provider.ts` | `fetchModels()`, `provideLanguageModelChatInformation()` | ✅ Implemented |
 | FR-003 | Chat Completion with Streaming | `src/client.ts` | `streamChatCompletion()`, SSE parsing | ✅ Implemented |
-| FR-004 | Function/Tool Calling Support | `src/provider.ts` | `provideLanguageModelChatResponse()`, tool conversion | ✅ Implemented |
+| FR-004 | Function/Tool Calling Support | `src/provider.ts` | `provideLanguageModelChatResponse()`, tool conversion, **tool execution & result reporting** | ✅ Implemented |
 | FR-005 | Token Management and Budgeting | `src/provider.ts` | `provideTokenCount()`, token estimation | ✅ Implemented |
 | FR-006 | Secure API Key Management | `src/secrets.ts`, `src/provider.ts` | `SecretManager`, `initializeApiKey()` | ✅ Implemented |
 | FR-007 | Server Presets for Quick Configuration | `src/statusBar.ts` | `ServerPreset` interface, presets array | ✅ Implemented |

@@ -51,6 +51,9 @@ export function activate(context: vscode.ExtensionContext) {
   const chatViewProvider = registerChatView(context, provider, sessionManager);
   context.subscriptions.push(chatViewProvider);
 
+  // Store chatViewProvider in a way that commands can access it
+  const chatViewProviderRef = { current: chatViewProvider };
+
   // Get server URL for status bar
   const config = vscode.workspace.getConfiguration('local.model.provider');
   const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
@@ -520,7 +523,20 @@ export function activate(context: vscode.ExtensionContext) {
 
         const config = vscode.workspace.getConfiguration('local.model.provider');
         const currentDefault = config.get<string>('defaultModel', '');
-        const selectedModel = models.find(m => m.id === currentDefault) || models[0];
+        // The defaultModel configuration stores the model's display name (as set in the dropdown),
+        // not the internal model ID. Match by name to respect the user's selection.
+        const fallbackModel = models.find(m => m.name === currentDefault) || models[0];
+
+        // Get the currently selected model from the chat view UI
+        const chatViewProvider = chatViewProviderRef.current as any;
+        let selectedModel = fallbackModel;
+        
+        if (chatViewProvider && chatViewProvider.getCurrentSelectedModelId) {
+          const currentSelectedModelId = chatViewProvider.getCurrentSelectedModelId();
+          if (currentSelectedModelId) {
+            selectedModel = models.find(m => m.id === currentSelectedModelId) || fallbackModel;
+          }
+        }
 
         logger.info(`[Local Model Provider] Generating prompts for model: ${selectedModel.name} (${selectedModel.id})`);
 

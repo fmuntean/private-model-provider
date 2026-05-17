@@ -212,8 +212,8 @@ export class SessionManager implements vscode.Disposable {
       this.logger.info(`[SessionManager] Saving session messages to: ${dateDir}`);
       fs.mkdirSync(dateDir, { recursive: true });
 
-      const hhmm = sessionDate.getHours().toString().padStart(2, '0') + 
-                   sessionDate.getMinutes().toString().padStart(2, '0');
+      const hhmm = sessionDate.getUTCHours().toString().padStart(2, '0') + 
+                   sessionDate.getUTCMinutes().toString().padStart(2, '0');
       
       const fileName = `${hhmm}-${session.id}.jsonl`;
       const filePath = path.join(dateDir, fileName);

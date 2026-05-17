@@ -10,6 +10,7 @@ import { getLogger, Logger } from '../logger';
 export class ChatSideBarProvider implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | undefined;
     private logger: Logger;
+    private currentSelectedModelId: string | null = null;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -115,7 +116,9 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                                         session: session
                                     });
                                 })
-                            } 
+                            }
+                            // Track the current selected model
+                            this.currentSelectedModelId = message.model; 
                             
                             this.webviewView?.webview.postMessage({
                                 type: 'user',
@@ -183,6 +186,12 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                             // Log message from webview
                             this.logger.info(`[Webview] ${message.message}`);
                             break;
+                            
+                        case 'modelSelected':
+                            // Track when user changes model selection
+                            this.currentSelectedModelId = message.model;
+                            this.logger.info(`[LMP] Model selection changed to: ${message.model}`);
+                            break;
                         // Tool results are now handled automatically by the provider; no UI round‑trip needed.
                     }
                 },
@@ -214,6 +223,13 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
         this.logger.info(`[LMP] Sent ${sessions.length} sessions to webview`);
     }
     
+    /**
+     * Get the currently selected model ID from the chat view
+     */
+    public getCurrentSelectedModelId(): string | null {
+        return this.currentSelectedModelId;
+    }
+
     /**
      * Send available models to the webview
      */
