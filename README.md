@@ -11,6 +11,19 @@
 
 A VS Code extension that connects your editor to self‑hosted or local LLMs via any OpenAI‑compatible server (vLLM, Ollama, TGI, llama.cpp, LocalAI, etc.). Keep source code on your infrastructure while using AI for coding, refactoring, analysis, and more.
 
+ Added chat functionality that offers precise control over prompts sent to the LLM, enhancing interactive capabilities.
+
+
+## 🗨️ New Chat Features
+
+The extension now includes a robust chat interface with the following capabilities:
+
+- **Prompt Control** – Directly influence the exact prompts sent to the LLM, allowing fine‑tuned interactions.
+- **Session Title Generation** – Automatic concise titles (~10 words) are generated from the first user message for easy session identification.
+- **Custom Summary Prompt** – Users can provide a custom `.llm/session.title.md` template to tailor title generation.
+- **Configurable Small Model** – Option to designate a lightweight model for faster title generation and summarization.
+- **Integrated Chat View** – Seamlessly accessible via the VS Code UI, supporting multi‑turn conversations with context preservation.
+
 
 ## ✨ Highlights
 

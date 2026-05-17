@@ -257,11 +257,13 @@ export class SessionManager implements vscode.Disposable {
     // Add master prompt as the first message if available
     const masterPrompt = this.promptManager.getMasterPrompt();
     if (masterPrompt) {
+      let model = {name:modelId} as vscode.LanguageModelChatInformation;
+      let prompt = this.promptManager.replacePlaceholders(masterPrompt,model);
       const promptMessage: ChatSessionMessage = {
         id: randomUUID(),
         type: 'prompt',
         role: 'system',
-        content: masterPrompt,
+        content: prompt,
         timestamp: now,
         modelId: modelId // Track which model this prompt is for
       };
@@ -273,11 +275,13 @@ export class SessionManager implements vscode.Disposable {
     // Load system prompt using PromptManager.getPrompt (no optimization)
     try {
       const systemPrompt = this.promptManager.getPrompt('system', modelId);
+      let model = {name:modelId} as vscode.LanguageModelChatInformation;
+      let prompt = this.promptManager.replacePlaceholders(systemPrompt,model);
       const systemMessage: ChatSessionMessage = {
         id: randomUUID(),
         type: 'prompt',
         role: 'system',
-        content: systemPrompt,
+        content: prompt,
         timestamp: now,
         modelId: modelId
       };
