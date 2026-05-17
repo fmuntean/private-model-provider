@@ -120,7 +120,7 @@ This document maps requirements to source code components, helping verify that a
 | DR-010 | MCP Server Configuration | `settings.json` | MCP config schema | ❌ Not implemented |
 | DR-011 | Rules Data | `src/provider.ts` | Rules files/settings | ❌ Not implemented |
 | DR-012 | Prompt Commands Data | New commands module | Prompt template storage | ❌ Not implemented |
-| DR-013 | Autocomplete Configuration | New autocomplete module | Autocomplete settings | ❌ Not implemented |
+| DR-013 | Autocomplete Configuration | New autocomplete module | Autocomplete settings | Status |
 |---------|------------------|-----------------|---------------|--------|
 | DR-001 | Configuration Data | `src/provider.ts`, `src/secrets.ts` | settings.json, SecretStorage | ✅ Implemented |
 | DR-002 | Model Data | `src/client.ts`, `src/provider.ts` | In-memory cache | ✅ Implemented |

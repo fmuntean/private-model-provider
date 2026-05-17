@@ -178,6 +178,10 @@ export class StatusBarManager implements vscode.Disposable {
         label: '$(sync) Refresh Models',
         description: 'Refresh the model list cache',
       },
+      {
+        label: '$(plug) Test Connection',
+        description: 'Verify server connectivity',
+      },
       { label: '', kind: vscode.QuickPickItemKind.Separator },
       {
         label: '$(sparkles) Generate System Prompts',
@@ -213,6 +217,8 @@ export class StatusBarManager implements vscode.Disposable {
       vscode.commands.executeCommand('local-model-provider.showStats');
     } else if (selected.label.includes('Refresh Models')) {
       vscode.commands.executeCommand('local-model-provider.refreshModels');
+    } else if (selected.label.includes('Test Connection')) {
+      vscode.commands.executeCommand('local-model-provider.testConnection');
     } else if (selected.label.includes('Generate System Prompts')) {
       vscode.commands.executeCommand('local-model-provider.generateSystemPrompts');
     } else if (selected.label.includes('Open Settings')) {

@@ -503,6 +503,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+
   // Register command to generate system prompts using PromptManager
   const generateSystemPromptsCommand = vscode.commands.registerCommand(
     'local-model-provider.generateSystemPrompts',
@@ -587,6 +588,27 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Register command to test server connection
+  const testConnectionCommand = vscode.commands.registerCommand(
+    'local-model-provider.testConnection',
+    async () => {
+      try {
+        // Attempt a silent fetch of models to verify connectivity
+        await provider.provideLanguageModelChatInformation(
+          { silent: true },
+          new vscode.CancellationTokenSource().token
+        );
+        vscode.window.showInformationMessage('Local Model Provider: Connection successful');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`Local Model Provider: Connection failed – ${msg}`);
+      }
+    }
+  );
+
+
+
+
   // Register command to show output channel
   const showOutputCommand = vscode.commands.registerCommand(
     'local-model-provider.showOutput',
@@ -597,6 +619,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(setApiKeyCommand);
   context.subscriptions.push(showStatusCommand);
+  context.subscriptions.push(testConnectionCommand);     // Add test connection command to subscriptions
   context.subscriptions.push(selectModelCommand);
   context.subscriptions.push(switchServerCommand);
   context.subscriptions.push(showStatsCommand);

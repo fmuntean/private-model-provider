@@ -61,7 +61,6 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
             }
-
             // Replace placeholders
             html = html.replace('{{cspSource}}', webviewView.webview.cspSource);
             html = html.replace(/{{nonce}}/g, nonce);
@@ -260,6 +259,18 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                 defaultModel: ''
             });
         }
+    }
+
+    
+    /**
+     * Dispose resources when the extension is deactivated.
+     * This satisfies the vscode.Disposable contract required when the provider
+     * is added to `context.subscriptions`.
+     */
+    public dispose(): void {
+        // Currently there are no long‑lived resources to clean up.
+        // The logger is shared; we simply log disposal for debugging.
+        this.logger.info('ChatSideBarProvider disposed');
     }
 }
 

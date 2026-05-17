@@ -98,6 +98,11 @@
         "category": "Local Model Provider"
       },
       {
+        "command": "local-model-provider.testConnection",
+        "title": "Test Connection",
+        "category": "Local Model Provider"
+      },
+      {
         "command": "local-model-provider.createSession",
         "title": "Create New Session",
         "category": "Local Model Provider"
