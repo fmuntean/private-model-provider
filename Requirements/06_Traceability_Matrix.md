@@ -95,7 +95,7 @@ This document maps requirements to source code components, helping verify that a
 | US-019 | View Server Status | FR-012 | `src/statusBar.ts` | ✅ Implemented |
 | US-020 | View Statistics | FR-011 | `src/statistics.ts`, status bar | ✅ Implemented |
 | US-021 | Debug with Logs | FR-016, NFR-015 | `src/provider.ts` | ✅ Implemented |
-| US-022 | Test Connection | N/A | Command registration | ❌ Not implemented |
+| US-022 | Test Connection | N/A | Command registration (`src/extension.ts`) | ✅ Implemented |
 | US-023 | Parallel Tool Calling | FR-004 | `src/provider.ts` | ✅ Implemented |
 | US-024 | Retry Failed Requests | FR-015 | `src/client.ts` | ✅ Implemented |
 | US-025 | Model Caching | FR-002 | `src/provider.ts` | ✅ Implemented |

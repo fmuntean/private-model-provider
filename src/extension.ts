@@ -470,7 +470,6 @@ export function activate(context: vscode.ExtensionContext) {
   const refreshModelsCommand = vscode.commands.registerCommand(
     'local-model-provider.refreshModels',
     async () => {
-      provider.clearModelCache();
       vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -479,11 +478,13 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async () => {
           try {
-            const models = await provider.provideLanguageModelChatInformation(
-              { silent: false },
-              new vscode.CancellationTokenSource().token
-            );
+            const models = await provider.refreshModels();
+            // Update status bar with new model count
             statusBar.setStatus(ServerStatus.Connected, { modelCount: models.length });
+            // Notify the chat view UI to refresh its model dropdown
+            if (chatViewProviderRef && chatViewProviderRef.current && typeof (chatViewProviderRef.current as any).refreshModels === 'function') {
+              (chatViewProviderRef.current as any).refreshModels();
+            }
             if (models.length > 0) {
               vscode.window.showInformationMessage(
                 `Model cache refreshed. Found ${models.length} model(s): ${models.map(m => m.name).join(', ')}`
@@ -593,6 +594,8 @@ export function activate(context: vscode.ExtensionContext) {
     'local-model-provider.testConnection',
     async () => {
       try {
+        // Ensure we fetch fresh model information, bypassing any cached list
+        provider.clearModelCache();
         // Attempt a silent fetch of models to verify connectivity
         await provider.provideLanguageModelChatInformation(
           { silent: true },
@@ -622,10 +625,87 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(testConnectionCommand);     // Add test connection command to subscriptions
   context.subscriptions.push(selectModelCommand);
   context.subscriptions.push(switchServerCommand);
+  // Register command to allow users to select which MCP tools are enabled
+  const selectMcpToolsCommand = vscode.commands.registerCommand(
+    'local-model-provider.selectMcpTools',
+    async () => {
+      // Access the MCP manager attached to the provider (may be undefined if MCP is not configured)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mcpMgr: any = (provider as any)['mcpManager'];
+      if (!mcpMgr || typeof mcpMgr.getToolDefinitions !== 'function') {
+        vscode.window.showWarningMessage('MCP manager not available – no tools to select');
+        return;
+      }
+
+      const allTools = mcpMgr.getToolDefinitions();
+      const toolNames = allTools.map((t: any) => t.function?.name ?? t.name);
+      const config = vscode.workspace.getConfiguration('local.model.provider');
+      const enabled: string[] = config.get<string[]>('enabledMcpTools', []);
+
+      const items: vscode.QuickPickItem[] = toolNames.map((name: string) => ({
+        label: name,
+      }));
+
+      const selected = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        placeHolder: 'Select MCP tools to enable for tool calling',
+      });
+
+      if (!selected) {
+        return; // user cancelled
+      }
+
+      const newEnabled = selected.map((s) => s.label);
+      await config.update('enabledMcpTools', newEnabled, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage('MCP tool selection updated');
+    }
+  );
+  // ---------------------------------------------------------------
+  // MCP Server management commands
+  // ---------------------------------------------------------------
+  const startMcpCommand = vscode.commands.registerCommand(
+    'local-model-provider.startMcpServers',
+    async () => {
+      try {
+        // Access the private mcpManager via bracket notation to avoid TS errors
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mcpMgr: any = (provider as any)['mcpManager'];
+        if (mcpMgr && typeof mcpMgr.startAll === 'function') {
+          await mcpMgr.startAll();
+          vscode.window.showInformationMessage('MCP servers started');
+        } else {
+          vscode.window.showWarningMessage('MCP manager not available');
+        }
+      } catch (e) {
+        vscode.window.showErrorMessage(`Failed to start MCP servers: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  );
+  const stopMcpCommand = vscode.commands.registerCommand(
+    'local-model-provider.stopMcpServers',
+    async () => {
+      try {
+        const mcpMgr: any = (provider as any)['mcpManager'];
+        if (mcpMgr && typeof mcpMgr.stopAll === 'function') {
+          await mcpMgr.stopAll();
+          vscode.window.showInformationMessage('MCP servers stopped');
+        } else {
+          vscode.window.showWarningMessage('MCP manager not available');
+        }
+      } catch (e) {
+        vscode.window.showErrorMessage(`Failed to stop MCP servers: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  );
+  // Register MCP server management commands
+  context.subscriptions.push(startMcpCommand);
+  context.subscriptions.push(stopMcpCommand);
   context.subscriptions.push(showStatsCommand);
   context.subscriptions.push(refreshModelsCommand);
   context.subscriptions.push(generateSystemPromptsCommand);
   context.subscriptions.push(showOutputCommand);
+  // Register the select MCP tools command so it is disposed correctly
+  context.subscriptions.push(selectMcpToolsCommand);
 
   // Watch for config changes to update status bar
   context.subscriptions.push(

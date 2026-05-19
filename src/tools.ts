@@ -124,7 +124,8 @@ export async function askQuestions(questions: any[]): Promise<any> {
  * This mirrors the previous implementation that lived in `llmClient.ts`.
  */
 export function getToolDefinitions(): any[] {
-    return [
+    // Base tool definitions used by the extension
+    const baseTools = [
         {
             type: 'function',
             function: {
@@ -227,6 +228,22 @@ export function getToolDefinitions(): any[] {
             }
         }
     ];
+
+    // Attempt to include MCP‑provided tools if the manager is available.
+    try {
+        // Dynamically require to avoid circular dependency issues.
+        const { MCPManager } = require('./mcp');
+        const mcp = new MCPManager();
+        const mcpTools = mcp.getToolDefinitions();
+        if (Array.isArray(mcpTools) && mcpTools.length > 0) {
+            return baseTools.concat(mcpTools);
+        }
+    } catch (e) {
+        // If MCP manager cannot be loaded, just log and continue with base tools.
+        console.warn('[tools] MCP manager not available or failed to load:', e);
+    }
+
+    return baseTools;
 }
 
 /** List code usages for a symbol. */

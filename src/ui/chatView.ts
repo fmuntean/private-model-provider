@@ -260,6 +260,16 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
             });
         }
     }
+    
+    /**
+     * Public method to trigger a refresh of the model list sent to the webview.
+     * This is used by the extension command that refreshes the model cache so
+     * the dropdown in the chat UI reflects the newly fetched models.
+     */
+    public async refreshModels(): Promise<void> {
+        await this.sendModels();
+    }
+
 
     
     /**

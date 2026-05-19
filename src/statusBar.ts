@@ -188,6 +188,10 @@ export class StatusBarManager implements vscode.Disposable {
         description: 'Generate optimized prompts for current model',
       },
       {
+        label: '$(tools) Select MCP Tools',
+        description: 'Enable or disable individual MCP tools for tool calling',
+      },
+      {
         label: '$(gear) Open Settings',
         description: 'Configure Local Model Provider settings',
       },
@@ -221,6 +225,8 @@ export class StatusBarManager implements vscode.Disposable {
       vscode.commands.executeCommand('local-model-provider.testConnection');
     } else if (selected.label.includes('Generate System Prompts')) {
       vscode.commands.executeCommand('local-model-provider.generateSystemPrompts');
+    } else if (selected.label.includes('Select MCP Tools')) {
+      vscode.commands.executeCommand('local-model-provider.selectMcpTools');
     } else if (selected.label.includes('Open Settings')) {
       vscode.commands.executeCommand(
         'workbench.action.openSettings',

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GatewayClient } from './client';
 import { GatewayConfig, OpenAIChatCompletionRequest, ChatMessageType, ChatSession } from './types';
+import { MCPManager } from './mcp';
 import { SecretManager } from './secretManager';
 import { StatisticsManager } from './statistics';
 import { SessionManager } from './sessionManager';
@@ -16,6 +17,7 @@ import { runCopilotTool } from './tools';
  */
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: GatewayClient;
+  private readonly mcpManager: MCPManager;
   private config: GatewayConfig;
   private readonly secretManager: SecretManager;
   private readonly statsManager: StatisticsManager | null;
@@ -87,6 +89,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       maxRetries: this.config.maxRetries,
       baseDelayMs: this.config.retryDelayMs,
     });
+    // Initialize MCP manager and start any configured servers
+    this.mcpManager = new MCPManager();
+    // Start servers asynchronously; errors are logged inside MCPManager
+    this.mcpManager.startAll().catch(err => this.logger.error('Failed to start MCP servers', err));
     
     // Initialize API key from secure storage (store promise for awaiting later)
     this.initializationPromise = this.initializeApiKey();
@@ -203,6 +209,26 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.logger.info('Model cache cleared');
     // Notify VS Code that the model list has changed
     this._onDidChangeLanguageModelChatInformation.fire();
+  }
+
+  /**
+   * Refresh the model cache and notify listeners.
+   * This method clears the cache, fetches the latest model list from the server,
+   * updates the internal cache, and then fires the change event so that any UI
+   * components (e.g., the built‑in model dropdown) are refreshed.
+   */
+  public async refreshModels(): Promise<vscode.LanguageModelChatInformation[]> {
+    // Clear existing cache first
+    this.clearModelCache();
+    // Fetch fresh models (silent false to allow UI messages if needed)
+    const models = await this.provideLanguageModelChatInformation(
+      { silent: false },
+      new vscode.CancellationTokenSource().token
+    );
+    // Update cache timestamp (provideLanguageModelChatInformation already caches)
+    // Fire change event to notify UI of the new list
+    this._onDidChangeLanguageModelChatInformation.fire();
+    return models;
   }
 
   /**
@@ -627,16 +653,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
               const result = await this.executeTool(toolCall.name, args as Record<string, unknown>);
               // Convert result to a plain object for the tool result part
               const resultObj = typeof result === 'object' && result !== null ? result : { value: result };
+              // LanguageModelToolResultPart expects either a string or an array. Cast to any to satisfy overload.
               progress.report(new vscode.LanguageModelToolResultPart(
                 toolCall.id,
-                JSON.stringify(resultObj)
+                JSON.stringify(resultObj) as any
               ));
             } catch (e) {
               this.logger.error(`Tool execution failed for ${toolCall.name}: ${e instanceof Error ? e.message : String(e)}`);
               // Report an error result so the model can continue
               progress.report(new vscode.LanguageModelToolResultPart(
                 toolCall.id,
-                JSON.stringify({ error: e instanceof Error ? e.message : String(e) })
+                JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) as any
               ));
             } finally {
               // Clean up pending map
@@ -908,24 +935,21 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     if (args === null) {
       this.logger.error(`  ERROR: Failed to parse tool call arguments`);
-          const parsedArgs = this.processToolCall(toolCall, progress);
-          // Persist tool call as a session message for visibility and later replay
-          try {
-            this.sessionManager.addMessage('tools', 'tool', JSON.stringify({ name: toolCall.name, arguments: parsedArgs }), { toolCallId: toolCall.id, toolCalls: [{ id: toolCall.id, name: toolCall.name, arguments: toolCall.arguments }], modelId: model.id });
-          } catch (e) {
-            this.logger.error(`Failed to persist tool call in session: ${e}`);
-          }
+      // Fallback to empty args to keep processing flow stable
+      args = {} as Record<string, unknown>;
     }
 
     const toolSchema = this.currentToolSchemas.get(toolCall.name) as Record<string, unknown> | undefined;
     if (toolSchema) {
-      args = this.fillMissingRequiredProperties(args, toolCall.name, toolSchema);
+      // args is guaranteed to be an object at this point
+      args = this.fillMissingRequiredProperties(args as Record<string, unknown>, toolCall.name, toolSchema);
     }
 
     this.logger.info(`=== END TOOL CALL ===\n`);
-    progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args));
+    // Ensure args is an object for the LanguageModelToolCallPart constructor
+    progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.name, args as object));
 
-    // Return the parsed/final arguments so callers can persist the tool call
+    // Return the parsed/final arguments so callers can persist the tool call if needed
     return args as Record<string, unknown>;
   }
 
@@ -1068,6 +1092,33 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       }
     }
     this.logger.debug(`Converted to ${openAIMessages.length} OpenAI messages`);
+
+    // ---------------------------------------------------------------------
+    // Context Providers Integration (US-029 / FR-025)
+    // ---------------------------------------------------------------------
+    // Gather additional context from the newly added providers module. The
+    // combined context is injected as a system‑role message at the beginning
+    // of the request so that the model can use it when generating a response.
+    // This is a simple default implementation – callers can later extend the
+    // provider list or make it configurable via settings.
+    try {
+      // Lazy import to avoid circular dependencies if this file is loaded early.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { FileContextProvider, CodeContextProvider, DiffContextProvider, combineContext } =
+        require('./contextProviders') as typeof import('./contextProviders');
+      const providers = [
+        new FileContextProvider('README.md'), // example static file
+        new CodeContextProvider(),
+        new DiffContextProvider(),
+      ];
+      const extraContext = await combineContext(providers);
+      if (extraContext) {
+        openAIMessages.unshift({ role: 'system', content: extraContext });
+        this.logger.info('Added combined context from providers as system message');
+      }
+    } catch (e) {
+      this.logger.warn(`Failed to gather context from providers: ${(e as Error).message}`);
+    }
 
     // Log message structure
     for (let i = 0; i < openAIMessages.length; i++) {
@@ -1468,7 +1519,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (this.config.enableToolCalling) {
       // Import the definitions lazily to avoid circular deps at top of file
       const { getToolDefinitions } = require('./tools');
-      requestOptions.tools = getToolDefinitions();
+      const allTools = getToolDefinitions();
+      // Apply user‑selected enable filter for MCP tools
+      const enabledMcpTools: string[] = vscode.workspace
+        .getConfiguration('local.model.provider')
+        .get<string[]>('enabledMcpTools', []);
+      // If the user has specified a whitelist, keep only those tools whose name matches.
+      if (enabledMcpTools.length > 0) {
+        requestOptions.tools = allTools.filter((t: any) => {
+          const name = t.function?.name ?? t.name;
+          // Core extension tools are always allowed; MCP tools are identified by being absent from the base list.
+          const coreToolNames = ['readFile', 'semanticSearch', 'askQuestions', 'applyPatch', 'runInTerminal'];
+          if (coreToolNames.includes(name)) return true;
+          return enabledMcpTools.includes(name);
+        });
+      } else {
+        requestOptions.tools = allTools;
+      }
     }
 
     try {
@@ -1621,12 +1688,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             const anyPart = part as any;
             // Tool call (assistant -> function)
             if (anyPart && typeof anyPart.callId === 'string' && 'name' in anyPart) {
+              // Cast to any to bypass strict type checking – the webview expects this shape.
               onChunk({
                 type: 'toolCall',
                 id: anyPart.callId,
                 name: anyPart.name,
                 arguments: anyPart.arguments || anyPart.input || anyPart.function?.arguments || ''
-              });
+              } as any);
               return;
             }
 
