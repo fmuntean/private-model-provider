@@ -98,14 +98,25 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                                         type: 'showChat',
                                         session: session
                                 });
+                                // Also update the current selected model ID to match the session's model
+                                if (session) {
+                                    this.currentSelectedModelId = session.modelId;
+                                    this.logger.info(`[LMP] Updated current model to session's model: ${session.modelId}`);
+                                }
                             }
                             break;
                             
                         case 'sendMessage':
                             // Send message to the model
                             if (!message.sessionId){
+                                // Get the default model from configuration if no model is selected
+                                let modelId = message.model;
+                                if (!modelId) {
+                                    const config = vscode.workspace.getConfiguration('local.model.provider');
+                                    modelId = config.get<string>('defaultModel', 'default');
+                                }
                                 //create a new session
-                                let session = this.sessionManager.createSession(message.model);
+                                let session = this.sessionManager.createSession(modelId);
                                 message.sessionId = session.id;
                                 //create session title
                                 this.provider.generateSessionTitle(message.text,session.id).then((title)=>{

@@ -51,7 +51,7 @@ export interface ExtensionConfig {
  */
 export interface ChatSession {
   id: string;
-  title?: string;
+  title: string;
   messages: ChatSessionMessage[];
 }
 /**
@@ -116,6 +116,39 @@ export interface OpenAIChatCompletionChunk {
     };
     finish_reason: string | null;
   }>;
+}
+
+/**
+ * Partial chunk of a streamed chat response used by the webview.
+ * Mirrors the shape expected by `streamMessage` callbacks in `provider.ts`.
+ */
+export interface MessageChunk {
+  /**
+   * The type of the chunk – typically omitted for plain text chunks.
+   * When present it can be used by the UI to differentiate between
+   * regular content, tool calls, tool results, etc.
+   */
+  type?: string;
+  /**
+   * The textual content of the chunk, if any.
+   */
+  content?: string;
+  /**
+   * Indicates whether this is the final chunk of the stream.
+   */
+  done?: boolean;
+  /**
+   * Usage information returned by the model (prompt/completion token counts).
+   */
+  usage?: any;
+  /**
+   * Flag set when the stream was cancelled by the user.
+   */
+  cancelled?: boolean;
+
+  name?: string;
+  id?: string;
+  arguments? : string;
 }
 
 export interface OpenAIChatCompletionResponse {

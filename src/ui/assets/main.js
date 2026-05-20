@@ -251,6 +251,11 @@ window.addEventListener('message', event => {
         }
         */
         renderChatView(msg.session);
+        // Update model dropdown to match the session's model ID
+        if (msg.session && msg.session.modelId && modelSelect) {
+            log('info', `Updating model dropdown to: ${msg.session.modelId}`);
+            modelSelect.value = msg.session.modelId;
+        }
     }
     
     if (msg.type === 'messageResponse') {

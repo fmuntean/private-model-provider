@@ -16,12 +16,14 @@ import * as vscode from 'vscode';
  * @param args     Arguments object that matches the tool's JSON schema.
  * @returns        A promise that resolves with the tool's result.
  */
-export async function runCopilotTool<T>(toolName: string, args: any): Promise<T> {
+export async function runCopilotTool(toolName: string, args: any): Promise<vscode.LanguageModelToolResult> {
     // Try to activate the Copilot extension if it exists. In some environments the
     // extension may be present but not yet activated, causing `getExtension` to
     // return undefined. We fall back to executing the command directly – VS Code
     // will queue the command until the extension activates.
-    const extensionId = 'GitHub.copilot';
+    
+    /*
+    const extensionId = 'GitHub.copilot-chat';
     const copilotExt = vscode.extensions.getExtension(extensionId);
     if (copilotExt) {
         try {
@@ -35,10 +37,12 @@ export async function runCopilotTool<T>(toolName: string, args: any): Promise<T>
         // command registered via another source (e.g., built‑in).
         console.warn(`[LMP] Copilot extension ${extensionId} not found; attempting command directly.`);
     }
-
-    const commandId = `copilot.runTool.${toolName}`;
+*/
+    //const commands = await vscode.commands.getCommands(true);
+    //const commandId = `copilot.runTool.${toolName}`;
     // The command returns whatever the underlying tool resolves to.
-    return vscode.commands.executeCommand<T>(commandId, args);
+    const token = new vscode.CancellationTokenSource().token;
+    return vscode.lm.invokeTool(toolName, args, token);
 }
 
 /**
@@ -119,6 +123,53 @@ export async function askQuestions(questions: any[]): Promise<any> {
     return runCopilotTool<any>('vscodeAskQuestions', { questions });
 }
 
+
+
+/**
+ * Retrieve tool definitions from the experimental VS Code Language Model (LM) API
+ * and convert them to the OpenAI function‑calling schema used by the extension.
+ *
+ * The LM API (if available) exposes an array of tool definition objects via
+ * `vscode.lm.tools`. These objects already contain `name`, `description` and a
+ * JSON‑Schema compatible `parameters` field, but they are not wrapped in the
+ * `{ type: 'function', function: { … } }` envelope expected by the OpenAI API.
+ * This helper converts each LM tool into that envelope and returns the array.
+ * If the LM API is unavailable or an error occurs, an empty array is returned
+ * so the caller can safely fall back to the built‑in tools.
+ */
+function getVsCodeToolDefinitions(): any[] {
+    try {
+        // The LM API is experimental and may not exist in older VS Code versions.
+        // Guard against undefined to avoid runtime errors.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lm = (vscode as any).lm;
+        if (lm && lm.tools) {
+            // `lm.tools` may be an array or an object exposing a method to get the
+            // definitions. We handle both cases.
+            let rawTools: any[] = [];
+            if (Array.isArray(lm.tools)) {
+                rawTools = lm.tools;
+            } else if (typeof lm.tools.getToolDefinitions === 'function') {
+                rawTools = lm.tools.getToolDefinitions();
+            }
+
+            // Convert each raw tool definition into the OpenAI function schema.
+            const converted = rawTools.map((tool) => ({
+                type: 'function',
+                function: tool,
+            }));
+            return converted;
+        }
+    } catch (e) {
+        console.warn('[tools] Failed to include vscode.lm.tools definitions:', e);
+    }
+    // Fallback – no LM tools available.
+    return [];
+}
+
+
+
+
 /**
  * Return the array of tool definitions compatible with the OpenAI function‑calling API.
  * This mirrors the previous implementation that lived in `llmClient.ts`.
@@ -139,18 +190,6 @@ export function getToolDefinitions(): any[] {
                         endLine: { type: 'integer', description: '1‑based end line.', default: 1000 }
                     },
                     required: ['filePath']
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'semanticSearch',
-                description: 'Perform a semantic search across the workspace.',
-                parameters: {
-                    type: 'object',
-                    properties: { query: { type: 'string', description: 'Search query string.' } },
-                    required: ['query']
                 }
             }
         },
@@ -203,7 +242,7 @@ export function getToolDefinitions(): any[] {
                     type: 'object',
                     properties: {
                         explanation: { type: 'string', description: 'Why the patch is being applied.' },
-                        patch: { type: 'string', description: 'The V4A‑style patch string.' }
+                        patch: { type: 'string', description: 'The V4A style patch string.' }
                     },
                     required: ['explanation', 'patch']
                 }
@@ -229,21 +268,43 @@ export function getToolDefinitions(): any[] {
         }
     ];
 
-    // Attempt to include MCP‑provided tools if the manager is available.
+    // -----------------------------------------------------------------
+    // Include built‑in VS Code Language Model (LM) tool definitions, if the
+    // experimental `vscode.lm` API is available.  The LM API exposes a
+    // `vscode.lm.tools.getToolDefinitions()` function that returns an array of
+    // tool definition objects compatible with the OpenAI function‑calling schema.
+    // -----------------------------------------------------------------
+    const vscode_tools = getVsCodeToolDefinitions();
+    // Merge base tools with any VS Code LM tools.
+    
+    // Append MCP‑provided tools if available.
+    const mcpTools = getMcpToolDefinitions();
+
+    if (Array.isArray(vscode_tools) && vscode_tools.length > 0) {    
+        if (Array.isArray(mcpTools) && mcpTools.length > 0) {
+                return baseTools.concat(vscode_tools).concat(mcpTools);
+        }
+        return baseTools.concat(vscode_tools);
+    }
+    return baseTools;
+}
+
+/**
+ * Load tool definitions from the optional MCP manager and merge them with the
+ * supplied tool array. If the MCP manager cannot be loaded or provides no tools,
+ * the original array is returned unchanged.
+ */
+function getMcpToolDefinitions() {
     try {
         // Dynamically require to avoid circular dependency issues.
         const { MCPManager } = require('./mcp');
         const mcp = new MCPManager();
         const mcpTools = mcp.getToolDefinitions();
-        if (Array.isArray(mcpTools) && mcpTools.length > 0) {
-            return baseTools.concat(mcpTools);
-        }
+        return mcpTools
     } catch (e) {
-        // If MCP manager cannot be loaded, just log and continue with base tools.
+        // If MCP manager cannot be loaded, just log and continue with existing tools.
         console.warn('[tools] MCP manager not available or failed to load:', e);
     }
-
-    return baseTools;
 }
 
 /** List code usages for a symbol. */
@@ -253,7 +314,7 @@ export async function listCodeUsages(params: {
     lineContent: string;
     symbol: string;
 }): Promise<any> {
-    return runCopilotTool<any>('vscodeListCodeUsages', params);
+    return runCopilotTool('vscodeListCodeUsages', params);
 }
 
 /** Rename a symbol across the workspace. */
@@ -264,7 +325,7 @@ export async function renameSymbol(params: {
     symbol: string;
     newName: string;
 }): Promise<any> {
-    return runCopilotTool<any>('vscodeRenameSymbol', params);
+    return runCopilotTool('vscodeRenameSymbol', params);
 }
 
 /** Convenience wrapper to log messages using the webview logger. */
