@@ -1,4 +1,4 @@
-// Launch configuration for debugging the Local Model Provider extension
+// Launch configuration for debugging the Private Model Provider extension
 {
   "version": "0.2.0",
   "configurations": [

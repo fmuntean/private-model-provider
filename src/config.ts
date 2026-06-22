@@ -6,11 +6,11 @@ import { ExtensionConfig } from './types';
  * Throws if required values are missing or invalid.
  */
 export function loadConfig(): ExtensionConfig {
-  // The extension's settings are defined under the "local.model.provider"
+  // The extension's settings are defined under the "private.model.provider"
   // namespace (see package.json). Using the incorrect namespace caused all
   // configuration values – including the MCP server definitions – to be read
   // as undefined, which prevented the MCP manager from detecting any servers.
-  const cfg = vscode.workspace.getConfiguration('local.model.provider');
+  const cfg = vscode.workspace.getConfiguration('private.model.provider');
   const config: ExtensionConfig = {
     defaultModelId: cfg.get<string>('defaultModelId'),
     maxConcurrentSessions: cfg.get<number>('maxConcurrentSessions'),

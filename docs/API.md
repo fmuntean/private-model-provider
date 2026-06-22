@@ -1,6 +1,6 @@
 # API Documentation
 
-This document describes the internal architecture and APIs of Local Model Provider.
+This document describes the internal architecture and APIs of Private Model Provider.
 
 ## Architecture Overview
 
@@ -8,7 +8,7 @@ This document describes the internal architecture and APIs of Local Model Provid
 ┌──────────────────────────────────────────────────────────────┐
 │                      VS Code                                 │
 │  ┌─────────────────┐    ┌──────────────────────────────────┐ │
-│  │  Copilot Chat   │◄──►│  Local Model Provider            │ │
+│  │  Copilot Chat   │◄──►│  Private Model Provider            │ │
 │  │                 │    │  ┌────────────────────────────┐  │ │
 │  │                 │    │  │   GatewayProvider          │  │ │
 │  │                 │    │  │   - Message conversion     │  │ │

@@ -1,7 +1,7 @@
 # Non-Functional Requirements
 
 ## Overview
-This document outlines the non-functional requirements for the Local Model Provider VS Code extension, covering performance, security, usability, and other quality attributes.
+This document outlines the non-functional requirements for the Private Model Provider VS Code extension, covering performance, security, usability, and other quality attributes.
 
 ---
 

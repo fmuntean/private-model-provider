@@ -54,7 +54,7 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webviewView.webview.cspSource}; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="${styleUri}" rel="stylesheet">
-  <title>Local Model Chat</title>
+  <title>Private Model Chat</title>
 </head>
 <body>
   <div>Could not load View</div>
@@ -112,7 +112,7 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                                 // Get the default model from configuration if no model is selected
                                 let modelId = message.model;
                                 if (!modelId) {
-                                    const config = vscode.workspace.getConfiguration('local.model.provider');
+                                    const config = vscode.workspace.getConfiguration('private.model.provider');
                                     modelId = config.get<string>('defaultModel', 'default');
                                 }
                                 //create a new session
@@ -252,7 +252,7 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                 new vscode.CancellationTokenSource().token
             );
             
-            const config = vscode.workspace.getConfiguration('local.model.provider');
+            const config = vscode.workspace.getConfiguration('private.model.provider');
             const defaultModel = config.get<string>('defaultModel', '');
             
             this.webviewView.webview.postMessage({

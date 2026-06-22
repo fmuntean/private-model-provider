@@ -1,6 +1,6 @@
-# Contributing to Local Model Provider
+# Contributing to Private Model Provider
 
-Thank you for your interest in contributing to Local Model Provider! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Private Model Provider! This document provides guidelines and instructions for contributing.
 
 ## Development Setup
 
@@ -15,8 +15,8 @@ Thank you for your interest in contributing to Local Model Provider! This docume
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/krevas/local-model-provider.git
-   cd local-model-provider
+   git clone https://github.com/krevas/private-model-provider.git
+   cd private-model-provider
    ```
 
 2. **Install dependencies**
@@ -36,7 +36,7 @@ Thank you for your interest in contributing to Local Model Provider! This docume
 ### Project Structure
 
 ```
-local-model-provider/
+private-model-provider/
 ├── src/
 │   ├── extension.ts    # Extension entry point
 │   ├── provider.ts     # Language model provider implementation
@@ -88,7 +88,7 @@ local-model-provider/
 
 1. Start an inference server (e.g., vLLM, Ollama)
 2. Launch the extension in debug mode (`F5`)
-3. Open Copilot Chat and select a model from Local Model Provider
+3. Open Copilot Chat and select a model from Private Model Provider
 4. Test various scenarios:
    - Basic chat completion
    - Tool calling

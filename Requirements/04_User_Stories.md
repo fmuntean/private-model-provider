@@ -1,7 +1,7 @@
 # User Stories
 
 ## Overview
-This document captures user stories for the Local Model Provider VS Code extension, organized by user personas and feature areas.
+This document captures user stories for the Private Model Provider VS Code extension, organized by user personas and feature areas.
 
 ---
 
@@ -14,7 +14,7 @@ This document captures user stories for the Local Model Provider VS Code extensi
 
 ### Persona 2: Data Scientist Dana
 - **Role**: Data Scientist/ML Engineer
-- **Goal**: Experiment with different local models for code generation
+- **Goal**: Experiment with different Private Models for code generation
 - **Needs**: Model switching, token tracking, session management
 
 ### Persona 3: Privacy-Conscious Patricia
@@ -33,7 +33,7 @@ This document captures user stories for the Local Model Provider VS Code extensi
 
 ### US-001: Install Extension
 **As a** Developer Dave  
-**I want to** install the Local Model Provider extension from the VS Code Marketplace  
+**I want to** install the Private Model Provider extension from the VS Code Marketplace  
 **So that** I can start using local LLMs in VS Code
 
 **Acceptance Criteria**:
@@ -67,7 +67,7 @@ This document captures user stories for the Local Model Provider VS Code extensi
 **So that** the extension knows where to send requests
 
 **Acceptance Criteria**:
-- Setting `local.model.provider.serverUrl` is available in settings UI
+- Setting `private.model.provider.serverUrl` is available in settings UI
 - Can use command palette to configure (future enhancement)
 - Validation of URL format
 - Default value points to common local server
@@ -345,7 +345,7 @@ This document captures user stories for the Local Model Provider VS Code extensi
 **So that** I can troubleshoot issues
 
 **Acceptance Criteria**:
-- Output channel "Local Model Provider"
+- Output channel "Private Model Provider"
 - Configurable log level (debug, info, warn, error)
 - Timestamps and context in log entries
 - Logs include request/response details at debug level

@@ -29,7 +29,7 @@ class SessionTreeItem extends vscode.TreeItem {
 
     this.contextValue = 'session';
     this.command = {
-      command: 'local-model-provider.switchSession',
+      command: 'private-model-provider.switchSession',
       title: 'Switch to Session',
       arguments: [session.id]
     };
@@ -102,7 +102,7 @@ export function registerSessionView(
 
   // Register commands
   const commands = [
-    vscode.commands.registerCommand('local-model-provider.createSession', async () => {
+    vscode.commands.registerCommand('private-model-provider.createSession', async () => {
       const session = sessionManager.createSession();
       sessionViewProvider.refresh();
       vscode.window.showInformationMessage(`Created new session: ${session.title}`);
@@ -110,14 +110,14 @@ export function registerSessionView(
       vscode.commands.executeCommand('localModelProvider.getSessions');
     }),
 
-    vscode.commands.registerCommand('local-model-provider.switchSession', async (sessionId: string) => {
+    vscode.commands.registerCommand('private-model-provider.switchSession', async (sessionId: string) => {
       sessionManager.switchSession(sessionId);
       sessionViewProvider.refresh();
       // Notify extension to update webview
       vscode.commands.executeCommand('localModelProvider.getSessions');
     }),
 
-    vscode.commands.registerCommand('local-model-provider.deleteSession', async (item?: SessionTreeItem) => {
+    vscode.commands.registerCommand('private-model-provider.deleteSession', async (item?: SessionTreeItem) => {
       let sessionId: string | undefined = item?.session.id;
       
       if (!sessionId) {
@@ -147,7 +147,7 @@ export function registerSessionView(
       }
     }),
 
-    vscode.commands.registerCommand('local-model-provider.renameSession', async (item?: SessionTreeItem) => {
+    vscode.commands.registerCommand('private-model-provider.renameSession', async (item?: SessionTreeItem) => {
       let sessionId: string | undefined = item?.session.id;
       
       if (!sessionId) {
@@ -185,7 +185,7 @@ export function registerSessionView(
       }
     }),
 
-    vscode.commands.registerCommand('local-model-provider.editMasterPrompt', async () => {
+    vscode.commands.registerCommand('private-model-provider.editMasterPrompt', async () => {
       const promptManager = new PromptManager(context);
       const masterPrompt = promptManager.getMasterPrompt() || '';
       

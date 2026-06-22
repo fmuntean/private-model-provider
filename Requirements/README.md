@@ -1,7 +1,7 @@
 # Requirements Documentation
 
 ## Overview
-This folder contains the comprehensive requirements documentation for the **Local Model Provider** VS Code extension.
+This folder contains the comprehensive requirements documentation for the **Private Model Provider** VS Code extension.
 
 ---
 
@@ -141,7 +141,7 @@ When updating requirements:
 ## Contact
 
 For questions about these requirements, please refer to:
-- Project repository: https://github.com/fmuntean/local-model-provider
+- Project repository: https://github.com/fmuntean/private-model-provider
 - Documentation: `docs/` folder
 - Issues: GitHub Issues on the repository
 
@@ -149,4 +149,4 @@ For questions about these requirements, please refer to:
 
 ## License
 
-This requirements documentation is part of the Local Model Provider project, licensed under MIT. See `LICENSE` file in the project root.
+This requirements documentation is part of the Private Model Provider project, licensed under MIT. See `LICENSE` file in the project root.

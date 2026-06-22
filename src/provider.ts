@@ -100,7 +100,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     // React to secret storage changes (API key updates)
     context.subscriptions.push(
       context.secrets.onDidChange(async (e) => {
-        if (e.key === 'local.model.provider.apiKey') {
+        if (e.key === 'private.model.provider.apiKey') {
           await this.refreshApiKey();
         }
       })
@@ -110,7 +110,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
           // General configuration changes (server URL, default model, etc.)
-          if (e.affectsConfiguration('local.model.provider')) {
+          if (e.affectsConfiguration('private.model.provider')) {
             this.logger.info('Configuration changed, reloading...');
             this.reloadConfig();
             // Clear model cache on config change
@@ -120,7 +120,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
           // Specific handling for MCP server definitions – restart servers so
           // changes take effect without requiring a full extension reload.
-          if (e.affectsConfiguration('local.model.provider.mcpServers')) {
+          if (e.affectsConfiguration('private.model.provider.mcpServers')) {
             this.logger.info('MCP server configuration changed, restarting servers');
             // Stop any currently running MCP processes before starting the new set.
             this.mcpManager.stopAll()
@@ -803,7 +803,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         const modelInfo: vscode.LanguageModelChatInformation = {
           id: model.id,
           name: model.id,
-          family: 'local-model-provider',
+          family: 'private-model-provider',
           maxInputTokens: this.config.defaultMaxTokens,
           maxOutputTokens: this.config.defaultMaxOutputTokens,
           version: '1.0.0',
@@ -826,11 +826,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.logger.error(`Failed to fetch models: ${errorMessage}`);
       if (!options.silent) {
         vscode.window.showErrorMessage(
-          `Local Model Provider: Failed to fetch models. ${errorMessage}`,
+          `Private Model Provider: Failed to fetch models. ${errorMessage}`,
           'Open Settings'
         ).then((selection: string | undefined) => {
           if (selection === 'Open Settings') {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'local.model.provider');
+            vscode.commands.executeCommand('workbench.action.openSettings', 'private.model.provider');
           }
         });
       }
@@ -1019,7 +1019,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     const errorMessage = `I was unable to generate a response. ${errorHint}\n\n` +
       `Diagnostic info:\n- Model: ${model.id}\n- Tools provided: ${toolCount}\n` +
       `- Estimated input tokens: ${inputTokenCount}\n- Context limit: ${modelMaxContext}\n\n` +
-      `Check the "Local Model Provider" output panel for detailed logs.`;
+      `Check the "Private Model Provider" output panel for detailed logs.`;
 
     progress.report(new vscode.LanguageModelTextPart(errorMessage));
   }
@@ -1044,17 +1044,17 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.logger.info('Try: 1) Using a different model, 2) Disabling tool calling in settings, or 3) Checking inference server logs');
 
       vscode.window.showErrorMessage(
-        `Local Model Provider: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
+        `Private Model Provider: Model failed to generate valid tool calls. This model may not support function calling. Check Output panel for details.`,
         'Open Output', 'Disable Tool Calling'
       ).then((selection: string | undefined) => {
         if (selection === 'Open Output') {
           this.logger.show();
         } else if (selection === 'Disable Tool Calling') {
-          vscode.workspace.getConfiguration('local.model.provider').update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
+          vscode.workspace.getConfiguration('private.model.provider').update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
         }
       });
     } else {
-      vscode.window.showErrorMessage(`Local Model Provider: Chat request failed. ${errorMessage}`);
+      vscode.window.showErrorMessage(`Private Model Provider: Chat request failed. ${errorMessage}`);
     }
 
     throw error;
@@ -1385,7 +1385,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: `Local Model Provider: ${modelId}  —  [Settings](command:workbench.action.openSettings?%22local.model.provider%22)`,
+        title: `Private Model Provider: ${modelId}  —  [Settings](command:workbench.action.openSettings?%22private.model.provider%22)`,
         cancellable: false,
       },
       () => new Promise((resolve) => setTimeout(resolve, 3000))
@@ -1396,7 +1396,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * Load configuration from VS Code settings
    */
   private loadConfig(): GatewayConfig {
-    const config = vscode.workspace.getConfiguration('local.model.provider');
+    const config = vscode.workspace.getConfiguration('private.model.provider');
 
     // Normalize server URL (strip trailing /v1 to avoid double path like /v1/v1)
     let serverUrlRaw = config.get<string>('serverUrl', 'http://localhost:8000');
@@ -1472,7 +1472,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Use provided model or fall back to default
     const targetModelId = modelId ||
-      vscode.workspace.getConfiguration('local.model.provider').get<string>('defaultModel', '');
+      vscode.workspace.getConfiguration('private.model.provider').get<string>('defaultModel', '');
 
     if (!targetModelId) {
       throw new Error('No model selected. Please select a model from the dropdown.');
@@ -1560,7 +1560,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       const allTools = getToolDefinitions();
       // Apply user‑selected enable filter for MCP tools
       const enabledMcpTools: string[] = vscode.workspace
-        .getConfiguration('local.model.provider')
+        .getConfiguration('private.model.provider')
         .get<string[]>('enabledMcpTools', []);
       // If the user has specified a whitelist, keep only those tools whose name matches.
       if (enabledMcpTools.length > 0) {
@@ -1629,7 +1629,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Use provided model or fall back to default
     const targetModelId = modelId ||
-      vscode.workspace.getConfiguration('local.model.provider').get<string>('defaultModel', '');
+      vscode.workspace.getConfiguration('private.model.provider').get<string>('defaultModel', '');
 
     if (!targetModelId) {
       throw new Error('No model selected. Please select a model from the dropdown.');
@@ -1888,7 +1888,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     const titlePromise = (async () => {
       await this.initializationPromise;
-      const config = vscode.workspace.getConfiguration('local.model.provider');
+      const config = vscode.workspace.getConfiguration('private.model.provider');
       const smallModelId = config.get<string>('smallModel', '');
       const targetModelId = smallModelId || config.get<string>('defaultModel', '');
       if (!targetModelId) {

@@ -1,7 +1,7 @@
 # Glossary
 
 ## Overview
-This document defines key terms and acronyms used in the Local Model Provider extension requirements and documentation.
+This document defines key terms and acronyms used in the Private Model Provider extension requirements and documentation.
 
 ---
 
@@ -215,7 +215,7 @@ The visual elements users interact with, including the webview chat panel and st
 ## V
 
 ### VS Code (Visual Studio Code)
-A free, open-source code editor by Microsoft that supports extensions like Local Model Provider.
+A free, open-source code editor by Microsoft that supports extensions like Private Model Provider.
 
 ---
 

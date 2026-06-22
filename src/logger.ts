@@ -13,14 +13,14 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 };
 
 /**
- * Centralized logger for the Local Model Provider extension
+ * Centralized logger for the Private Model Provider extension
  * Outputs to a dedicated VSCode OutputChannel
  */
 export class Logger implements vscode.Disposable {
   private outputChannel: vscode.OutputChannel;
   private static instance: Logger | undefined;
 
-  private constructor(name: string = 'Local Model') {
+  private constructor(name: string = 'Private Model') {
     this.outputChannel = vscode.window.createOutputChannel(name);
   }
 
@@ -38,7 +38,7 @@ export class Logger implements vscode.Disposable {
    * Get the configured log level from VS Code settings
    */
   private getConfiguredLogLevel(): LogLevel {
-    const config = vscode.workspace.getConfiguration('local.model.provider');
+    const config = vscode.workspace.getConfiguration('private.model.provider');
     return config.get<LogLevel>('logLevel', 'info');
   }
 

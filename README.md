@@ -1,11 +1,11 @@
-# Local Model Provider
+# Private Model Provider
 ![VS Code](https://img.shields.io/badge/Visual_Studio_Code-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white)
 ![Local LLM](https://img.shields.io/badge/Local_LLM-f39c12?style=for-the-badge&logo=amazoneks&logoColor=white)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg?style=for-the-badge)
 
-![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/krevas.local-model-provider?style=flat-square)
-![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/krevas.local-model-provider?style=flat-square)
-![License](https://img.shields.io/github/license/krevas/local-model-provider?style=flat-square)
+![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/krevas.private-model-provider?style=flat-square)
+![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/krevas.private-model-provider?style=flat-square)
+![License](https://img.shields.io/github/license/krevas/private-model-provider?style=flat-square)
 
 **Connect your local LLMs directly to VS Code for a private and powerful AI coding experience.**
 
@@ -40,7 +40,7 @@ The extension now includes a robust chat interface with the following capabiliti
 
 ## 🔌 Compatible Inference Servers
 
-- vLLM (recommended)
+- vLLM
 - LM Studio
 - Ollama
 - llama.cpp
@@ -50,7 +50,7 @@ The extension now includes a robust chat interface with the following capabiliti
 
 ## 📥 Installation
 
-1) Install “Local Model Provider” from the VS Code Marketplace.
+1) Install “Private Model Provider” from the VS Code Marketplace.
 2) Reload VS Code if prompted.
 
 ## 🚀 Quick Start
@@ -88,11 +88,11 @@ The extension now includes a robust chat interface with the following capabiliti
   
 - LM Studio example
   1. Download and install [LM Studio](https://lmstudio.ai/)
-  2. Load a model in the LM Studio UI
+  2. Load a model in the LM Studio UI (optional)
   3. Start the local server (default: `http://localhost:1234`)
-  4. Set `local.model.provider.serverUrl` to `http://localhost:1234`
+  4. Set `private.model.provider.serverUrl` to `http://localhost:1234`
   
-  > **Tip:** If tool calling causes errors with your model, disable `local.model.provider.enableToolCalling` in settings.
+  > **Tip:** If tool calling causes errors with your model, disable `private.model.provider.enableToolCalling` in settings.
 
 - Ollama example
   ```bash
@@ -100,12 +100,12 @@ The extension now includes a robust chat interface with the following capabiliti
   ```
 
 2) Configure the extension
-- Open VS Code Settings and search for “Local Model Provider”.
-- Required: set `local.model.provider.serverUrl` (e.g. http://localhost:8000)
-- Optional: run “Local Model Provider: Set API Key (Secure)” to store a key in SecretStorage
+- Open VS Code Settings and search for “Private Model Provider”.
+- Required: set `private.model.provider.serverUrl` (e.g. http://localhost:8000)
+- Optional: run “Private Model Provider: Set API Key (Secure)” to store a key in SecretStorage
 
 3) Use your models
-- Open the model manager and enable models from the “Local Model Provider”.
+- Open the model manager and enable models from the “Private Model Provider”.
 
 ## 🖼️ Screenshots
 
@@ -134,7 +134,7 @@ The extension now includes a robust chat interface with the following capabiliti
 The extension can automatically generate concise session titles based on the first user message. This helps you identify and organize your chat sessions more easily.
 
 ### Configuration
-- Set `local.model.provider.smallModel` to use a smaller, faster model for title generation
+- Set `private.model.provider.smallModel` to use a smaller, faster model for title generation
 - If `smallModel` is not configured, the `defaultModel` will be used as fallback
 - The title is generated as a ~10 word summary of the first message
 
@@ -153,7 +153,7 @@ If no custom template is found, a default prompt will be used.
 
 ## ⚙️ Configuration
 
-All settings are under the `local.model.provider.*` namespace.
+All settings are under the `private.model.provider.*` namespace.
 
 ### Server Configuration
 - `serverUrl` (string): base URL, e.g. `http://localhost:8000`
@@ -183,16 +183,16 @@ All settings are under the `local.model.provider.*` namespace.
 - `logLevel` ("debug" | "info" | "warn" | "error")
 
 API keys are not stored in settings. Use the command palette:
-- “Local Model Provider: Set API Key (Secure)”
+- “Private Model Provider: Set API Key (Secure)”
 
 ## ⌨️ Commands
 
-- "Local Model Provider: Set API Key (Secure)" — Store/remove API key in SecretStorage
-- "Local Model Provider: Show Server Status" — Open the status bar menu with quick actions
-- "Local Model Provider: View Models & Set Default" — Browse available models and set a default
-- "Local Model Provider: Switch Server Preset" — Quick switch between configured server endpoints
-- "Local Model Provider: View Usage Statistics" — Display session statistics (requests, tokens, response times)
-- "Local Model Provider: Refresh Model Cache" — Clear cache and fetch models from server
+- "Private Model Provider: Set API Key (Secure)" — Store/remove API key in SecretStorage
+- "Private Model Provider: Show Server Status" — Open the status bar menu with quick actions
+- "Private Model Provider: View Models & Set Default" — Browse available models and set a default
+- "Private Model Provider: Switch Server Preset" — Quick switch between configured server endpoints
+- "Private Model Provider: View Usage Statistics" — Display session statistics (requests, tokens, response times)
+- "Private Model Provider: Refresh Model Cache" — Clear cache and fetch models from server
 
 ## 🏥 Status Bar Health Monitor
 
@@ -215,7 +215,7 @@ The status bar displays:
 Models don’t appear
 1) `curl http://HOST:PORT/v1/models` and confirm the server responds
 2) Verify `serverUrl` is correct (protocol/port included)
-3) Run “Local Model Provider: Test Server Connection”
+3) Run “Private Model Provider: Test Server Connection”
 
 Empty response
 1) Ensure the correct tool‑call parser for your model family (e.g. vLLM `--tool-call-parser`)
@@ -249,4 +249,4 @@ Licensed under the [MIT](LICENSE) license.
 
 ## 💬 Support
 
-- Issues & Feature Requests: https://github.com/krevas/local-model-provider/issues
+- Issues & Feature Requests: https://github.com/krevas/private-model-provider/issues

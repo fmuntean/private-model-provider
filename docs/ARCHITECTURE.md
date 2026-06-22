@@ -1,6 +1,6 @@
 # Architecture Overview
 
-This document describes the internal components of the **Local Model Provider** extension and how they interact.
+This document describes the internal components of the **Private Model Provider** extension and how they interact.
 
 ## Component Diagram
 

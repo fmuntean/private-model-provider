@@ -1,7 +1,7 @@
 # System Requirements
 
 ## Overview
-This document outlines the system requirements for the Local Model Provider VS Code extension, including technical specifications, dependencies, and environmental constraints.
+This document outlines the system requirements for the Private Model Provider VS Code extension, including technical specifications, dependencies, and environmental constraints.
 
 ---
 
@@ -123,7 +123,7 @@ This document outlines the system requirements for the Local Model Provider VS C
 - **LAN**: Supported (e.g., http://192.168.1.100:8000)
 - **TLS/HTTPS**: Supported for remote servers
 - **Authentication**: API key via Authorization header or custom header
-- **Timeout**: Configurable (`local.model.provider.requestTimeout`, default 30 seconds)
+- **Timeout**: Configurable (`private.model.provider.requestTimeout`, default 30 seconds)
 
 **Priority**: High
 
@@ -186,7 +186,7 @@ This document outlines the system requirements for the Local Model Provider VS C
 
 ### SR-008.2: Secret Storage
 - **API Keys**: Stored in `vscode.SecretStorage` (encrypted)
-- **Secret Key**: `local.model.provider.apiKey`
+- **Secret Key**: `private.model.provider.apiKey`
 - **Access**: Asynchronous retrieval via `context.secrets.get()`
 
 ### SR-008.3: Network Security
@@ -203,88 +203,88 @@ This document outlines the system requirements for the Local Model Provider VS C
 ### SR-009.1: VS Code Settings (contributes.configuration)
 ```json
 {
-  "local.model.provider.serverUrl": {
+  "private.model.provider.serverUrl": {
     "type": "string",
     "default": "http://localhost:8000",
     "description": "Base URL of the inference server"
   },
-  "local.model.provider.defaultModel": {
+  "private.model.provider.defaultModel": {
     "type": "string",
     "default": "",
     "description": "Default model to use for requests"
   },
-  "local.model.provider.enableToolCalling": {
+  "private.model.provider.enableToolCalling": {
     "type": "boolean",
     "default": true,
     "description": "Enable function/tool calling"
   },
-  "local.model.provider.parallelToolCalling": {
+  "private.model.provider.parallelToolCalling": {
     "type": "boolean",
     "default": false,
     "description": "Allow parallel tool execution"
   },
-  "local.model.provider.agentTemperature": {
+  "private.model.provider.agentTemperature": {
     "type": "number",
     "default": 0.7,
     "description": "Temperature for tool mode"
   },
-  "local.model.provider.topP": {
+  "private.model.provider.topP": {
     "type": "number",
     "default": 1.0,
     "description": "Nucleus sampling parameter"
   },
-  "local.model.provider.frequencyPenalty": {
+  "private.model.provider.frequencyPenalty": {
     "type": "number",
     "default": 0.0,
     "description": "Reduce token repetition"
   },
-  "local.model.provider.presencePenalty": {
+  "private.model.provider.presencePenalty": {
     "type": "number",
     "default": 0.0,
     "description": "Encourage new topics"
   },
-  "local.model.provider.defaultMaxTokens": {
+  "private.model.provider.defaultMaxTokens": {
     "type": "number",
     "default": 131072,
     "description": "Max input tokens (context window)"
   },
-  "local.model.provider.defaultMaxOutputTokens": {
+  "private.model.provider.defaultMaxOutputTokens": {
     "type": "number",
     "default": 4096,
     "description": "Max output tokens"
   },
-  "local.model.provider.requestTimeout": {
+  "private.model.provider.requestTimeout": {
     "type": "number",
     "default": 30000,
     "description": "Request timeout in milliseconds"
   },
-  "local.model.provider.maxRetries": {
+  "private.model.provider.maxRetries": {
     "type": "number",
     "default": 3,
     "description": "Maximum retry attempts"
   },
-  "local.model.provider.retryDelayMs": {
+  "private.model.provider.retryDelayMs": {
     "type": "number",
     "default": 1000,
     "description": "Base retry delay in milliseconds"
   },
-  "local.model.provider.modelCacheTtlMs": {
+  "private.model.provider.modelCacheTtlMs": {
     "type": "number",
     "default": 300000,
     "description": "Model list cache duration in milliseconds"
   },
-  "local.model.provider.logLevel": {
+  "private.model.provider.logLevel": {
     "type": "string",
     "enum": ["debug", "info", "warn", "error"],
     "default": "info",
     "description": "Logging verbosity level"
   },
-  "local.model.provider.showTokenStats": {
+  "private.model.provider.showTokenStats": {
     "type": "boolean",
     "default": true,
     "description": "Show token usage in status bar"
   },
-  "local.model.provider.systemPrompt": {
+  "private.model.provider.systemPrompt": {
     "type": "string",
     "default": "You are a helpful assistant.",
     "description": "Default system prompt for conversations"
@@ -304,9 +304,9 @@ This document outlines the system requirements for the Local Model Provider VS C
 | `localModelProvider.sendMessage` | Send Message | Send a message to the LLM |
 | `localModelProvider.getStats` | Get Statistics | Retrieve usage statistics |
 | `localModelProvider.getSessions` | Get Sessions | List chat sessions |
-| `local-model-provider.showStatus` | Show Status | Display server status and options |
-| `local-model-provider.setApiKey` | Set API Key | Securely store API key |
-| `local-model-provider.clearModelCache` | Clear Model Cache | Force refresh model list |
+| `private-model-provider.showStatus` | Show Status | Display server status and options |
+| `private-model-provider.setApiKey` | Set API Key | Securely store API key |
+| `private-model-provider.clearModelCache` | Clear Model Cache | Force refresh model list |
 
 **Priority**: High
 
@@ -319,8 +319,8 @@ This document outlines the system requirements for the Local Model Provider VS C
 - **Alternative**: `*` (any event) for debugging only
 
 ### SR-011.2: Language Model Provider
-- **Registration**: `vscode.lm.registerLanguageModelChatProvider('local-model-provider', provider)`
-- **Namespace**: `local-model-provider` (used in Copilot Chat model picker)
+- **Registration**: `vscode.lm.registerLanguageModelChatProvider('private-model-provider', provider)`
+- **Namespace**: `private-model-provider` (used in Copilot Chat model picker)
 
 **Priority**: High
 
@@ -329,8 +329,8 @@ This document outlines the system requirements for the Local Model Provider VS C
 ## SR-012: Output and Logging
 
 ### SR-012.1: Output Channel
-- **Name**: "Local Model Provider"
-- **Access**: `vscode.window.createOutputChannel('Local Model Provider')`
+- **Name**: "Private Model Provider"
+- **Access**: `vscode.window.createOutputChannel('Private Model Provider')`
 - **Log Format**: `[timestamp] [LEVEL] message`
 - **Log Levels**: debug, info, warn, error
 
@@ -355,7 +355,7 @@ out/
 
 ### SR-013.2: Repository Structure
 ```
-local-model-provider/
+private-model-provider/
 ├── src/              # TypeScript source code
 ├── docs/             # Documentation
 ├── assets/           # Images and icons

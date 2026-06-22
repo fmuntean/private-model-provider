@@ -16,7 +16,7 @@ import { GatewayClient } from './client';
  */
 export function activate(context: vscode.ExtensionContext) {
   const logger = getLogger();
-  logger.info('Local Model Provider extension is now active');
+  logger.info('Private Model Provider extension is now active');
 
 
   // Create statistics manager
@@ -41,7 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
   const provider = new GatewayProvider(context, statsManager, sessionManager);
 
   const disposable = vscode.lm.registerLanguageModelChatProvider(
-    'local-model-provider',
+    'private-model-provider',
     provider
   );
 
@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
   const chatViewProviderRef = { current: chatViewProvider };
 
   // Get server URL for status bar
-  const config = vscode.workspace.getConfiguration('local.model.provider');
+  const config = vscode.workspace.getConfiguration('private.model.provider');
   const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
   statusBar.setStatus(ServerStatus.Unknown, { serverUrl });
 
@@ -65,6 +65,7 @@ export function activate(context: vscode.ExtensionContext) {
   // ---------------------------------------------------------------------
   const runHealthCheck = async () => {
     try {
+      const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
       // Silent request – we only care about success/failure
       const models = await provider.provideLanguageModelChatInformation(
         { silent: true },
@@ -84,17 +85,17 @@ export function activate(context: vscode.ExtensionContext) {
   // Re‑run health check when the server URL changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('local.model.provider.serverUrl')) {
+      if (e.affectsConfiguration('private.model.provider.serverUrl')) {
         const newUrl = vscode.workspace
-          .getConfiguration('local.model.provider')
+          .getConfiguration('private.model.provider')
           .get<string>('serverUrl', 'http://localhost:8000');
         statusBar.setStatus(ServerStatus.Unknown, { serverUrl: newUrl });
         runHealthCheck();
       }
       // When the default model changes, persist it to the active session
-      if (e.affectsConfiguration('local.model.provider.defaultModel')) {
+      if (e.affectsConfiguration('private.model.provider.defaultModel')) {
         const newModel = vscode.workspace
-          .getConfiguration('local.model.provider')
+          .getConfiguration('private.model.provider')
           .get<string>('defaultModel', '');
         if (newModel) {
           sessionManager.setActiveSessionModel(newModel);
@@ -107,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to set API key securely
   const setApiKeyCommand = vscode.commands.registerCommand(
-    'local-model-provider.setApiKey',
+    'private-model-provider.setApiKey',
     async () => {
       const secretManager = provider.getSecretManager();
       const hasExisting = await secretManager.hasApiKey();
@@ -133,16 +134,16 @@ export function activate(context: vscode.ExtensionContext) {
         await provider.refreshApiKey();
         if (apiKey) {
           vscode.window.showInformationMessage(
-            'Local Model Provider: API key stored securely.'
+            'Private Model Provider: API key stored securely.'
           );
         } else {
           vscode.window.showInformationMessage(
-            'Local Model Provider: API key removed.'
+            'Private Model Provider: API key removed.'
           );
         }
       } catch (error) {
         vscode.window.showErrorMessage(
-          `Local Model Provider: Failed to store API key. ${error instanceof Error ? error.message : String(error)}`
+          `Private Model Provider: Failed to store API key. ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }
@@ -150,13 +151,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to show status menu
   const showStatusCommand = vscode.commands.registerCommand(
-    'local-model-provider.showStatus',
+    'private-model-provider.showStatus',
     () => statusBar.showStatusMenu()
   );
 
   // Register command to view and select models
   const selectModelCommand = vscode.commands.registerCommand(
-    'local-model-provider.selectModel',
+    'private-model-provider.selectModel',
     async () => {
       try {
         const models = await provider.provideLanguageModelChatInformation(
@@ -169,7 +170,7 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const currentDefault = vscode.workspace.getConfiguration('local.model.provider')
+        const currentDefault = vscode.workspace.getConfiguration('private.model.provider')
           .get<string>('defaultModel', '');
 
         const items: vscode.QuickPickItem[] = models.map((model) => ({
@@ -185,7 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (selected) {
           const modelName = selected.label.replace(/^\$\([^)]+\)\s*/, '');
-          await vscode.workspace.getConfiguration('local.model.provider')
+          await vscode.workspace.getConfiguration('private.model.provider')
             .update('defaultModel', modelName, vscode.ConfigurationTarget.Global);
           
           // Immediately update status bar to reflect the change
@@ -201,18 +202,18 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to switch server presets
   const switchServerCommand = vscode.commands.registerCommand(
-    'local-model-provider.switchServer',
+    'private-model-provider.switchServer',
     async () => {
       const logger = getLogger();
-      const config = vscode.workspace.getConfiguration('local.model.provider');
+      const config = vscode.workspace.getConfiguration('private.model.provider');
       const presets = config.get<ServerPreset[]>('serverPresets', []);
       
       // Get current URL from actual config (check both workspace and global)
       const currentUrl = config.get<string>('serverUrl', 'http://localhost:8000');
       
       // Log for debugging
-      logger.info(`[Local Model Provider] Current server URL: ${currentUrl}`);
-      logger.info(`[Local Model Provider] Available presets: ${presets.map(p => `${p.name}: ${p.url}`)}`);
+      logger.info(`[Private Model Provider] Current server URL: ${currentUrl}`);
+      logger.info(`[Private Model Provider] Available presets: ${presets.map(p => `${p.name}: ${p.url}`)}`);
 
       const items: vscode.QuickPickItem[] = [
         {
@@ -355,7 +356,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (confirmed === 'Delete') {
           const updatedPresets = presets.filter(p => p.name !== presetName);
-          await vscode.workspace.getConfiguration('local.model.provider')
+          await vscode.workspace.getConfiguration('private.model.provider')
             .update('serverPresets', updatedPresets, vscode.ConfigurationTarget.Global);
           
           vscode.window.showInformationMessage(`Deleted preset: ${presetName}`);
@@ -368,7 +369,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         // Switch to selected preset
-        logger.info(`[Local Model Provider] Switching from ${currentUrl} to ${selected.detail}`);
+        logger.info(`[Private Model Provider] Switching from ${currentUrl} to ${selected.detail}`);
         
         // Determine which configuration target to use
         const inspection = config.inspect<string>('serverUrl');
@@ -380,16 +381,16 @@ export function activate(context: vscode.ExtensionContext) {
           target = vscode.ConfigurationTarget.WorkspaceFolder;
         }
         
-        logger.info(`[Local Model Provider] Updating serverUrl at target: ${target}`);
+        logger.info(`[Private Model Provider] Updating serverUrl at target: ${target}`);
         
         await config.update('serverUrl', selected.detail, target);
         // Ensure provider uses latest configuration immediately
         provider.applyLatestConfiguration();
         
         // Verify the change
-        const newUrl = vscode.workspace.getConfiguration('local.model.provider')
+        const newUrl = vscode.workspace.getConfiguration('private.model.provider')
           .get<string>('serverUrl');
-        logger.info(`[Local Model Provider] Server URL after update: ${newUrl}`);
+        logger.info(`[Private Model Provider] Server URL after update: ${newUrl}`);
 
         statusBar.setStatus(ServerStatus.Unknown, { serverUrl: selected.detail });
         provider.clearModelCache();
@@ -430,7 +431,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to show statistics
   const showStatsCommand = vscode.commands.registerCommand(
-    'local-model-provider.showStats',
+    'private-model-provider.showStats',
     async () => {
       const stats = statsManager.getSessionStats();
       const modelStats = statsManager.getModelStats();
@@ -468,7 +469,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to refresh model cache
   const refreshModelsCommand = vscode.commands.registerCommand(
-    'local-model-provider.refreshModels',
+    'private-model-provider.refreshModels',
     async () => {
       vscode.window.withProgress(
         {
@@ -507,7 +508,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to generate system prompts using PromptManager
   const generateSystemPromptsCommand = vscode.commands.registerCommand(
-    'local-model-provider.generateSystemPrompts',
+    'private-model-provider.generateSystemPrompts',
     async () => {
       try {
         const logger = getLogger();
@@ -523,7 +524,7 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const config = vscode.workspace.getConfiguration('local.model.provider');
+        const config = vscode.workspace.getConfiguration('private.model.provider');
         const currentDefault = config.get<string>('defaultModel', '');
         // The defaultModel configuration stores the model's display name (as set in the dropdown),
         // not the internal model ID. Match by name to respect the user's selection.
@@ -540,7 +541,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
 
-        logger.info(`[Local Model Provider] Generating prompts for model: ${selectedModel.name} (${selectedModel.id})`);
+        logger.info(`[Private Model Provider] Generating prompts for model: ${selectedModel.name} (${selectedModel.id})`);
 
         // Use PromptManager for paths and templates
         const promptManager = new PromptManager(context);
@@ -584,14 +585,14 @@ export function activate(context: vscode.ExtensionContext) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         vscode.window.showErrorMessage(`Failed to generate system prompts: ${errorMessage}`);
         const logger = getLogger();
-        logger.error(`[Local Model Provider] Failed to generate prompts: ${errorMessage}`);
+        logger.error(`[Private Model Provider] Failed to generate prompts: ${errorMessage}`);
       }
     }
   );
 
   // Register command to test server connection
   const testConnectionCommand = vscode.commands.registerCommand(
-    'local-model-provider.testConnection',
+    'private-model-provider.testConnection',
     async () => {
       try {
         // Ensure we fetch fresh model information, bypassing any cached list
@@ -601,10 +602,10 @@ export function activate(context: vscode.ExtensionContext) {
           { silent: true },
           new vscode.CancellationTokenSource().token
         );
-        vscode.window.showInformationMessage('Local Model Provider: Connection successful');
+        vscode.window.showInformationMessage('Private Model Provider: Connection successful');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Local Model Provider: Connection failed – ${msg}`);
+        vscode.window.showErrorMessage(`Private Model Provider: Connection failed – ${msg}`);
       }
     }
   );
@@ -614,7 +615,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register command to show output channel
   const showOutputCommand = vscode.commands.registerCommand(
-    'local-model-provider.showOutput',
+    'private-model-provider.showOutput',
     () => {
       provider.getOutputChannel().show();
     }
@@ -627,7 +628,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(switchServerCommand);
   // Register command to allow users to select which MCP tools are enabled
   const selectMcpToolsCommand = vscode.commands.registerCommand(
-    'local-model-provider.selectMcpTools',
+    'private-model-provider.selectMcpTools',
     async () => {
       // Access the MCP manager attached to the provider (may be undefined if MCP is not configured)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -639,7 +640,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       const allTools = mcpMgr.getToolDefinitions();
       const toolNames = allTools.map((t: any) => t.function?.name ?? t.name);
-      const config = vscode.workspace.getConfiguration('local.model.provider');
+      const config = vscode.workspace.getConfiguration('private.model.provider');
       const enabled: string[] = config.get<string[]>('enabledMcpTools', []);
 
       const items: vscode.QuickPickItem[] = toolNames.map((name: string) => ({
@@ -664,7 +665,7 @@ export function activate(context: vscode.ExtensionContext) {
   // MCP Server management commands
   // ---------------------------------------------------------------
   const startMcpCommand = vscode.commands.registerCommand(
-    'local-model-provider.startMcpServers',
+    'private-model-provider.startMcpServers',
     async () => {
       try {
         // Access the private mcpManager via bracket notation to avoid TS errors
@@ -682,7 +683,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
   const stopMcpCommand = vscode.commands.registerCommand(
-    'local-model-provider.stopMcpServers',
+    'private-model-provider.stopMcpServers',
     async () => {
       try {
         const mcpMgr: any = (provider as any)['mcpManager'];
@@ -710,20 +711,20 @@ export function activate(context: vscode.ExtensionContext) {
   // Watch for config changes to update status bar
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('local.model.provider.serverUrl')) {
-        const newConfig = vscode.workspace.getConfiguration('local.model.provider');
+      if (e.affectsConfiguration('private.model.provider.serverUrl')) {
+        const newConfig = vscode.workspace.getConfiguration('private.model.provider');
         const newServerUrl = newConfig.get<string>('serverUrl', 'http://localhost:8000');
         statusBar.setStatus(ServerStatus.Unknown, { serverUrl: newServerUrl });
       }
       
       // Clear model cache when defaultModel changes to force VS Code to refresh
-      if (e.affectsConfiguration('local.model.provider.defaultModel')) {
+      if (e.affectsConfiguration('private.model.provider.defaultModel')) {
         provider.clearModelCache();
       }
     })
   );
 
-  logger.info('Local Model Provider registered with vendor ID: local-model-provider');
+  logger.info('Private Model Provider registered with vendor ID: private-model-provider');
 }
 
 /**
@@ -731,6 +732,6 @@ export function activate(context: vscode.ExtensionContext) {
  */
 export function deactivate() {
   const logger = getLogger();
-  logger.info('Local Model Provider extension is now deactivated');
+  logger.info('Private Model Provider extension is now deactivated');
 }
 

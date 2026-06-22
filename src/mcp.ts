@@ -33,7 +33,7 @@ export class MCPManager {
 
   /** Load server configs from VS Code settings */
   private loadConfigs() {
-    const cfg = vscode.workspace.getConfiguration('local.model.provider');
+    const cfg = vscode.workspace.getConfiguration('private.model.provider');
     const servers = cfg.get<any[]>('mcpServers', []);
     this.configs.length = 0;
     for (const s of servers) {

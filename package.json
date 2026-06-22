@@ -1,15 +1,15 @@
 {
-  "name": "local-model-provider",
-  "displayName": "MFD: Local Model Provider",
-  "description": "VS Code extension to connect to local LLM inference servers (Ollama, llama.cpp, LocalAI, LM Studio, vLLM) via OpenAI API compatible endpoints.",
-  "version": "1.1.2",
+  "name": "private-model-provider",
+  "displayName": "MFD: Private Model Provider",
+  "description": "VS Code extension to connect to private or local LLM inference servers (Ollama, llama.cpp, LocalAI, LM Studio, vLLM) via OpenAI API compatible endpoints.",
+  "version": "1.1.3",
   "publisher": "mfd",
-  "icon": "assets/local-model-provider.png",
+  "icon": "assets/private-model-provider.png",
   "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fmuntean/local-model-provider.git"
+    "url": "https://github.com/fmuntean/private-model-provider.git"
   },
   "engines": {
     "vscode": "^1.100.0"
@@ -62,78 +62,78 @@
   "contributes": {
     "languageModelChatProviders": [
       {
-        "vendor": "local-model-provider",
-        "displayName": "Local Model Provider"
+        "vendor": "private-model-provider",
+        "displayName": "Private Model Provider"
       }
     ],
     "commands": [
       {
-        "command": "local-model-provider.setApiKey",
+        "command": "private-model-provider.setApiKey",
         "title": "Set API Key (Secure)",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.showStatus",
+        "command": "private-model-provider.showStatus",
         "title": "Show Server Status",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.selectModel",
+        "command": "private-model-provider.selectModel",
         "title": "View Models & Set Default",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
         {
-          "command": "local-model-provider.switchServer",
+          "command": "private-model-provider.switchServer",
           "title": "Switch Server Preset",
-          "category": "Local Model Provider"
+          "category": "Private Model Provider"
         },
         {
-          "command": "local-model-provider.selectMcpTools",
+          "command": "private-model-provider.selectMcpTools",
           "title": "Select MCP Tools",
-          "category": "Local Model Provider"
+          "category": "Private Model Provider"
         },
       {
-        "command": "local-model-provider.showStats",
+        "command": "private-model-provider.showStats",
         "title": "View Usage Statistics",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.refreshModels",
+        "command": "private-model-provider.refreshModels",
         "title": "Refresh Model Cache",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.testConnection",
+        "command": "private-model-provider.testConnection",
         "title": "Test Connection",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.createSession",
+        "command": "private-model-provider.createSession",
         "title": "Create New Session",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.switchSession",
+        "command": "private-model-provider.switchSession",
         "title": "Switch to Session",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.generateSystemPrompts",
+        "command": "private-model-provider.generateSystemPrompts",
         "title": "Generate System Prompts",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       },
       {
-        "command": "local-model-provider.deleteSession",
+        "command": "private-model-provider.deleteSession",
         "title": "Delete Session",
-        "category": "Local Model Provider"
+        "category": "Private Model Provider"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "localModelProvider",
-          "title": "Local Model",
-          "icon": "assets/local-model-provider.png",
+          "title": "Private Model",
+          "icon": "assets/private-model-provider.png",
           "location": "secondarySideBar"
         }
       ]
@@ -144,20 +144,20 @@
           "id": "localModelProvider.chat",
           "name": "LMP",
           "type": "webview",
-          "icon": "assets/local-model-provider.png"
+          "icon": "assets/private-model-provider.png"
         }
       ]
     },
     "configuration": {
-      "title": "Local Model Provider",
+      "title": "Private Model Provider",
       "properties": {
-        "local.model.provider.serverUrl": {
+        "private.model.provider.serverUrl": {
           "type": "string",
           "default": "http://localhost:8000",
           "description": "Inference server URL (OpenAI API compatible endpoint)",
           "order": 1
         },
-        "local.model.provider.serverPresets": {
+        "private.model.provider.serverPresets": {
           "type": "array",
           "default": [],
           "items": {
@@ -180,13 +180,13 @@
           "description": "Saved server presets for quick switching",
           "order": 2
         },
-        "local.model.provider.defaultModel": {
+        "private.model.provider.defaultModel": {
           "type": "string",
           "default": "",
           "description": "Default model ID to use (leave empty for auto-select)",
           "order": 3
         },
-        "local.model.provider.mcpServers": {
+        "private.model.provider.mcpServers": {
           "type": "array",
           "default": [],
           "description": "MCP server configurations for tool extensibility.",
@@ -203,50 +203,50 @@
           },
           "order": 10
         },
-        "local.model.provider.enabledMcpTools": {
+        "private.model.provider.enabledMcpTools": {
           "type": "array",
           "default": [],
           "description": "List of enabled MCP tool names. Only these tools will be sent to the model for tool calling.",
           "items": { "type": "string" },
           "order": 11
         },
-        "local.model.provider.smallModel": {
+        "private.model.provider.smallModel": {
           "type": "string",
           "default": "",
           "description": "Small model ID for summarization and title generation tasks (leave empty to use default model)",
           "order": 4
         },
-        "local.model.provider.requestTimeout": {
+        "private.model.provider.requestTimeout": {
           "type": "number",
           "default": 60000,
           "description": "Request timeout in milliseconds",
           "order": 5
         },
-        "local.model.provider.defaultMaxTokens": {
+        "private.model.provider.defaultMaxTokens": {
           "type": "number",
           "default": 32768,
           "description": "Default maximum input tokens for models (context window)",
           "order": 6
         },
-        "local.model.provider.defaultMaxOutputTokens": {
+        "private.model.provider.defaultMaxOutputTokens": {
           "type": "number",
           "default": 4096,
           "description": "Default maximum output tokens for models",
           "order": 7
         },
-        "local.model.provider.enableToolCalling": {
+        "private.model.provider.enableToolCalling": {
           "type": "boolean",
           "default": true,
           "description": "Enable tool calling capability for models",
           "order": 8
         },
-        "local.model.provider.parallelToolCalling": {
+        "private.model.provider.parallelToolCalling": {
           "type": "boolean",
           "default": true,
           "description": "Allow model to call multiple tools in parallel (disable if model has issues with parallel calls)",
           "order": 9
         },
-        "local.model.provider.agentTemperature": {
+        "private.model.provider.agentTemperature": {
           "type": "number",
           "default": 0,
           "minimum": 0,
@@ -254,7 +254,7 @@
           "description": "Temperature for agent/tool calling mode (lower = more consistent tool call formatting). Set to 0.0 for best results with fine-tuned models.",
           "order": 10
         },
-        "local.model.provider.topP": {
+        "private.model.provider.topP": {
           "type": "number",
           "default": 1,
           "minimum": 0,
@@ -262,7 +262,7 @@
           "description": "Top-p (nucleus) sampling parameter. Lower values make output more focused.",
           "order": 11
         },
-        "local.model.provider.frequencyPenalty": {
+        "private.model.provider.frequencyPenalty": {
           "type": "number",
           "default": 0,
           "minimum": -2,
@@ -270,7 +270,7 @@
           "description": "Frequency penalty to reduce repetition of token sequences.",
           "order": 12
         },
-        "local.model.provider.presencePenalty": {
+        "private.model.provider.presencePenalty": {
           "type": "number",
           "default": 0,
           "minimum": -2,
@@ -278,7 +278,7 @@
           "description": "Presence penalty to encourage talking about new topics.",
           "order": 13
         },
-        "local.model.provider.maxRetries": {
+        "private.model.provider.maxRetries": {
           "type": "number",
           "default": 3,
           "minimum": 0,
@@ -286,7 +286,7 @@
           "description": "Maximum number of retry attempts for failed requests.",
           "order": 15
         },
-        "local.model.provider.retryDelayMs": {
+        "private.model.provider.retryDelayMs": {
           "type": "number",
           "default": 1000,
           "minimum": 100,
@@ -294,7 +294,7 @@
           "description": "Base delay in milliseconds between retry attempts (uses exponential backoff).",
           "order": 16
         },
-        "local.model.provider.modelCacheTtlMs": {
+        "private.model.provider.modelCacheTtlMs": {
           "type": "number",
           "default": 300000,
           "minimum": 0,
@@ -302,7 +302,7 @@
           "description": "How long to cache the model list in milliseconds (0 = no caching, default = 5 minutes).",
           "order": 17
         },
-        "local.model.provider.logLevel": {
+        "private.model.provider.logLevel": {
           "type": "string",
           "default": "warn",
           "enum": [
@@ -321,7 +321,7 @@
           "order": 18
         }
       },
-      "local.model.provider.availableMcpTools": {
+      "private.model.provider.availableMcpTools": {
         "type": "array",
         "default": [],
         "description": "List of MCP tool names that can be enabled/disabled via the UI.",

@@ -1,7 +1,7 @@
 # Functional Requirements
 
 ## Overview
-This document outlines the functional requirements for the Local Model Provider VS Code extension, which enables developers to connect local LLM inference servers to VS Code for AI-assisted coding.
+This document outlines the functional requirements for the Private Model Provider VS Code extension, which enables developers to connect local LLM inference servers to VS Code for AI-assisted coding.
 
 ---
 
@@ -13,7 +13,7 @@ This document outlines the functional requirements for the Local Model Provider 
 
 **Acceptance Criteria**:
 - Support vLLM, Ollama, llama.cpp, LM Studio, LocalAI, and Text Generation Inference
-- Configurable server URL via `local.model.provider.serverUrl` setting
+- Configurable server URL via `private.model.provider.serverUrl` setting
 - Support for custom endpoints beyond the predefined list
 - Automatic detection of server availability
 
@@ -29,8 +29,8 @@ This document outlines the functional requirements for the Local Model Provider 
 
 **Acceptance Criteria**:
 - Fetch model list from `/v1/models` endpoint
-- Cache model list with configurable TTL (`local.model.provider.modelCacheTtlMs`)
-- Allow setting a default model (`local.model.provider.defaultModel`)
+- Cache model list with configurable TTL (`private.model.provider.modelCacheTtlMs`)
+- Allow setting a default model (`private.model.provider.defaultModel`)
 - Display available models in VS Code model picker
 - Support model switching during chat sessions
 
@@ -63,7 +63,7 @@ This document outlines the functional requirements for the Local Model Provider 
 
 **Acceptance Criteria**:
 - Convert VS Code LanguageModelTool definitions to OpenAI function format
-- Support parallel tool calling (`local.model.provider.parallelToolCalling`)
+- Support parallel tool calling (`private.model.provider.parallelToolCalling`)
 - Parse tool call responses from streaming responses
 - Repair malformed JSON in tool call arguments
 - Fill missing required properties in tool calls
@@ -85,7 +85,7 @@ This document outlines the functional requirements for the Local Model Provider 
 - Truncate conversation history to fit context window
 - Track token usage per request (prompt, completion, total)
 - Categorize tokens by type (prompt, context, user, agent, tools)
-- Respect `local.model.provider.defaultMaxTokens` (input) and `defaultMaxOutputTokens` (output)
+- Respect `private.model.provider.defaultMaxTokens` (input) and `defaultMaxOutputTokens` (output)
 - Provide token usage statistics to users
 
 **Priority**: High
@@ -171,7 +171,7 @@ This document outlines the functional requirements for the Local Model Provider 
 **Rationale**: Different tasks require different system prompts to guide model behavior effectively. Advanced configuration allows per-model and per-role customization.
 
 **Acceptance Criteria**:
-- Configurable default system prompt (`local.model.provider.systemPrompt`)
+- Configurable default system prompt (`private.model.provider.systemPrompt`)
 - Support for system prompt file in `.llm/` folder
 - Allow editing system prompt per session
 - Support PromptTemplates folder for reusable templates
@@ -214,7 +214,7 @@ This document outlines the functional requirements for the Local Model Provider 
 **Acceptance Criteria**:
 - Show server connection status (connected, error, unknown)
 - Display model count when connected
-- Show token usage badge (optional, `local.model.provider.showTokenStats`)
+- Show token usage badge (optional, `private.model.provider.showTokenStats`)
 - Quick access to server presets
 - Quick access to model selection
 - Color-coded status indicators
@@ -275,8 +275,8 @@ This document outlines the functional requirements for the Local Model Provider 
 **Acceptance Criteria**:
 - Retry on retryable status codes (429, 500, 502, 503, 504)
 - Exponential backoff with jitter
-- Configurable max retries (`local.model.provider.maxRetries`)
-- Configurable base delay (`local.model.provider.retryDelayMs`)
+- Configurable max retries (`private.model.provider.maxRetries`)
+- Configurable base delay (`private.model.provider.retryDelayMs`)
 - Maximum delay cap to prevent excessive waits
 - Log retry attempts for debugging
 
@@ -565,7 +565,7 @@ This document outlines the functional requirements for the Local Model Provider 
 **Rationale**: Using a smaller, faster model for summarization and title generation reduces latency and resource usage compared to using the main chat model for these auxiliary tasks.
 
 **Acceptance Criteria**:
-- Add new setting `local.model.provider.smallModel` to configure a small model for summarization tasks
+- Add new setting `private.model.provider.smallModel` to configure a small model for summarization tasks
 - Modify the session creation flow to use the small model for generating session titles
 - When a new session starts with the first message, automatically generate a title using the small model
 - Use a 10-word summary prompt to generate concise session titles

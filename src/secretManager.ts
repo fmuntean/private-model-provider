@@ -4,7 +4,7 @@ import { getLogger, Logger } from './logger';
 /**
  * Secret key constants
  */
-const API_KEY_SECRET = 'local.model.provider.apiKey';
+const API_KEY_SECRET = 'private.model.provider.apiKey';
 
 /**
  * Manages secure storage for sensitive configuration like API keys
@@ -30,7 +30,7 @@ export class SecretManager {
       }
 
       // Fallback: Check if there's a key in settings (legacy)
-      const config = vscode.workspace.getConfiguration('local.model.provider');
+      const config = vscode.workspace.getConfiguration('private.model.provider');
       const settingsKey = config.get<string>('apiKey', '');
       
       if (settingsKey) {

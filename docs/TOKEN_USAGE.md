@@ -17,7 +17,7 @@ A token roughly corresponds to a word or a piece of punctuation. Most LLM APIs r
 ## Viewing Token Stats
 - **In‑Chat** – The bottom of the chat pane shows `Tokens used this session: X` after each response.
 - **Status Bar** – A badge on the right side of the VS Code status bar shows the overall token count for the current VS Code session.
-- **Command Palette** – Run **Local Model Provider: Show Token Stats** to open a quick‑pick view with detailed numbers (session, daily, total).
+- **Command Palette** – Run **Private Model Provider: Show Token Stats** to open a quick‑pick view with detailed numbers (session, daily, total).
 
 ## Managing Limits
 - **Max Tokens Setting** – `localModelProvider.maxTokens` caps the number of tokens the model may generate per response.

@@ -1,6 +1,6 @@
-# Send Message Flow - Local Model Provider
+# Send Message Flow - Private Model Provider
 
-This document describes the complete flow when a user sends their first message through the Local Model Provider extension.
+This document describes the complete flow when a user sends their first message through the Private Model Provider extension.
 
 ## Flow Diagram
 
@@ -230,10 +230,10 @@ Throughout the streaming process:
 
 ## Configuration Options Used
 
-- `local.model.provider.defaultModel`: Default model to use
-- `local.model.provider.smallModel`: Model for title generation
-- `local.model.provider.serverUrl`: LLM server endpoint
-- `local.model.provider.defaultMaxOutputTokens`: Max tokens in response
+- `private.model.provider.defaultModel`: Default model to use
+- `private.model.provider.smallModel`: Model for title generation
+- `private.model.provider.serverUrl`: LLM server endpoint
+- `private.model.provider.defaultMaxOutputTokens`: Max tokens in response
 - Master prompt: `.llm/SystemPrompt.md` in workspace root
 
 ## Error Handling

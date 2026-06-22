@@ -1,11 +1,11 @@
 # Chat Interface
 
 ## Overview
-This extension replaces the built‑in GitHub Copilot chat with a full‑featured ChatGPT‑style interface. Users can open the **Local Model Chat** command, type prompts, and receive responses from a configurable LLM endpoint.
+This extension replaces the built‑in GitHub Copilot chat with a full‑featured ChatGPT‑style interface. Users can open the **Private Model Chat** command, type prompts, and receive responses from a configurable LLM endpoint.
 
 ## Getting Started
 1. Open the command palette (`Ctrl+Shift+P`).
-2. Run **Local Model Chat: Open**.
+2. Run **Private Model Chat: Open**.
 3. Type a message in the input box and press **Enter** or click **Send**.
 4. The response appears in the chat pane. Token usage is shown in the status bar.
 
@@ -29,7 +29,7 @@ This extension replaces the built‑in GitHub Copilot chat with a full‑feature
 
 ## FAQ
 - **Where are my API keys stored?**  They are saved securely using VS Code's `SecretStorage` API.
-- **Can I use a local model (e.g., Ollama)?**  Yes – set the `localModelProvider.endpoint` to your local server URL.
+- **Can I use a Private Model (e.g., Ollama)?**  Yes – set the `localModelProvider.endpoint` to your local server URL.
 - **How is token usage calculated?**  The LLM provider returns a `usage` object (prompt/completion/total tokens) which is aggregated by the extension.
 
 ---

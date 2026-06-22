@@ -35,25 +35,25 @@ interface StatusInfo {
 const STATUS_CONFIG: Record<ServerStatus, StatusInfo> = {
   [ServerStatus.Unknown]: {
     icon: '$(plug)',
-    text: 'Local LLM',
-    tooltip: 'Local Model Provider: Click for options',
+    text: 'Private LLM',
+    tooltip: 'Private Model Provider: Click for options',
   },
   [ServerStatus.Connected]: {
     icon: '$(check)',
-    text: 'Local LLM',
-    tooltip: 'Local Model Provider: Connected',
+    text: 'Private LLM',
+    tooltip: 'Private Model Provider: Connected',
     color: new vscode.ThemeColor('statusBarItem.prominentForeground'),
   },
   [ServerStatus.Error]: {
     icon: '$(error)',
-    text: 'Local LLM',
-    tooltip: 'Local Model Provider: Error',
+    text: 'Private LLM',
+    tooltip: 'Private Model Provider: Error',
     color: new vscode.ThemeColor('statusBarItem.errorForeground'),
   },
 };
 
 /**
- * Manages the status bar UI for Local Model Provider
+ * Manages the status bar UI for Private Model Provider
  */
 export class StatusBarManager implements vscode.Disposable {
   private readonly statusBarItem: vscode.StatusBarItem;
@@ -69,7 +69,7 @@ export class StatusBarManager implements vscode.Disposable {
       vscode.StatusBarAlignment.Right,
       100
     );
-    this.statusBarItem.command = 'local-model-provider.showStatus';
+    this.statusBarItem.command = 'private-model-provider.showStatus';
     this.updateDisplay();
     this.statusBarItem.show();
   }
@@ -193,7 +193,7 @@ export class StatusBarManager implements vscode.Disposable {
       },
       {
         label: '$(gear) Open Settings',
-        description: 'Configure Local Model Provider settings',
+        description: 'Configure Private Model Provider settings',
       },
       {
         label: '$(key) Set API Key',
@@ -206,7 +206,7 @@ export class StatusBarManager implements vscode.Disposable {
     ];
 
     const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: `Local Model Provider (${this.getStatusLabel()})`,
+      placeHolder: `Private Model Provider (${this.getStatusLabel()})`,
     });
 
     if (!selected) {
@@ -214,28 +214,28 @@ export class StatusBarManager implements vscode.Disposable {
     }
 
     if (selected.label.includes('View Models')) {
-      vscode.commands.executeCommand('local-model-provider.selectModel');
+      vscode.commands.executeCommand('private-model-provider.selectModel');
     } else if (selected.label.includes('Switch Server')) {
-      vscode.commands.executeCommand('local-model-provider.switchServer');
+      vscode.commands.executeCommand('private-model-provider.switchServer');
     } else if (selected.label.includes('View Statistics')) {
-      vscode.commands.executeCommand('local-model-provider.showStats');
+      vscode.commands.executeCommand('private-model-provider.showStats');
     } else if (selected.label.includes('Refresh Models')) {
-      vscode.commands.executeCommand('local-model-provider.refreshModels');
+      vscode.commands.executeCommand('private-model-provider.refreshModels');
     } else if (selected.label.includes('Test Connection')) {
-      vscode.commands.executeCommand('local-model-provider.testConnection');
+      vscode.commands.executeCommand('private-model-provider.testConnection');
     } else if (selected.label.includes('Generate System Prompts')) {
-      vscode.commands.executeCommand('local-model-provider.generateSystemPrompts');
+      vscode.commands.executeCommand('private-model-provider.generateSystemPrompts');
     } else if (selected.label.includes('Select MCP Tools')) {
-      vscode.commands.executeCommand('local-model-provider.selectMcpTools');
+      vscode.commands.executeCommand('private-model-provider.selectMcpTools');
     } else if (selected.label.includes('Open Settings')) {
       vscode.commands.executeCommand(
         'workbench.action.openSettings',
-        'local.model.provider'
+        'private.model.provider'
       );
     } else if (selected.label.includes('Set API Key')) {
-      vscode.commands.executeCommand('local-model-provider.setApiKey');
+      vscode.commands.executeCommand('private-model-provider.setApiKey');
     } else if (selected.label.includes('Show Output')) {
-      vscode.commands.executeCommand('local-model-provider.showOutput');
+      vscode.commands.executeCommand('private-model-provider.showOutput');
     }
   }
 

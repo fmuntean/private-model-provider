@@ -1,7 +1,7 @@
 # Data Requirements
 
 ## Overview
-This document outlines the data requirements for the Local Model Provider VS Code extension, including data models, storage formats, and data flow.
+This document outlines the data requirements for the Private Model Provider VS Code extension, including data models, storage formats, and data flow.
 
 ---
 
@@ -388,7 +388,7 @@ interface ExtensionMessage {
 **Sources** (in order of precedence):
 1. Session-specific system prompt (webview editor)
 2. Workspace file: `<workspace>/.llm/system-prompt.md`
-3. Settings: `local.model.provider.systemPrompt`
+3. Settings: `private.model.provider.systemPrompt`
 4. Default: "You are a helpful assistant."
 
 **Schema**: Plain text (Markdown supported)
@@ -473,7 +473,7 @@ interface MCPServerConfig {
 
 **Sources** (in order of precedence):
 1. Workspace file: `<workspace>/.llm/rules.md`
-2. Settings array: `local.model.provider.rules`
+2. Settings array: `private.model.provider.rules`
 3. Remote URL reference
 
 **Schema**:

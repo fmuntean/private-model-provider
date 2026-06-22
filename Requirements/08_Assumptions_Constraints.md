@@ -1,7 +1,7 @@
 # Assumptions and Constraints
 
 ## Overview
-This document captures the assumptions made during requirements elicitation and the constraints that limit the solution space for the Local Model Provider VS Code extension.
+This document captures the assumptions made during requirements elicitation and the constraints that limit the solution space for the Private Model Provider VS Code extension.
 
 ---
 
