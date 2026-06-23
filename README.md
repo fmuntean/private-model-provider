@@ -3,20 +3,28 @@
 ![Local LLM](https://img.shields.io/badge/Local_LLM-f39c12?style=for-the-badge&logo=amazoneks&logoColor=white)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg?style=for-the-badge)
 
-![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/krevas.private-model-provider?style=flat-square)
-![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/krevas.private-model-provider?style=flat-square)
-![License](https://img.shields.io/github/license/krevas/private-model-provider?style=flat-square)
+![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/fmuntean.private-model-provider?style=flat-square)
+![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/fmuntean.private-model-provider?style=flat-square)
+![License](https://img.shields.io/github/license/fmuntean/private-model-provider?style=flat-square)
 
 **Connect your local LLMs directly to VS Code for a private and powerful AI coding experience.**
 
 A VS Code extension that connects your editor to self‑hosted or local LLMs via any OpenAI‑compatible server (vLLM, Ollama, TGI, llama.cpp, LocalAI, etc.). Keep source code on your infrastructure while using AI for coding, refactoring, analysis, and more.
 
- Added chat functionality that offers precise control over prompts sent to the LLM, enhancing interactive capabilities.
+There are three modes of operation:
+1. Use the Github Copilot or other AI chats and use your model as an external provider.
+2. Use the Chat functionality that offers precise control over prompts sent to the LLM, enhancing interactive capabilities.
+3. From terminal as a standard CLI
 
 
-## 🗨️ New Chat Features
+### 1. GitHub Copilot private provider
+Using this extension as an external provider for GitHub Copilot allos you to use the standard interface, features, and tools but sending the chat to the private LLM either hosted locally on your own infrastructure.
 
-The extension now includes a robust chat interface with the following capabilities:
+For more info see: [`PrivateLLM-Provider.md`](docs/PrivateLLM-Provider.md).
+
+### 2. Private LLM Chat Features
+
+The extensionincludes a robust chat interface with the following capabilities:
 
 - **Prompt Control** – Directly influence the exact prompts sent to the LLM, allowing fine‑tuned interactions.
 - **Session Title Generation** – Automatic concise titles (~10 words) are generated from the first user message for easy session identification.
@@ -24,6 +32,13 @@ The extension now includes a robust chat interface with the following capabiliti
 - **Configurable Small Model** – Option to designate a lightweight model for faster title generation and summarization.
 - **Integrated Chat View** – Seamlessly accessible via the VS Code UI, supporting multi‑turn conversations with context preservation.
 
+For more info see: [`PrivateLLM-Chat.md`](docs/PrivateLLM-Chat.md)
+
+### 3. Private LLM CLI 
+
+Use the standard CLI to connect to your private LLM from the terminal.
+
+for more info see: [`PrivateLLM-CLI.md`](docs/PrivateLLM-CLI.md)
 
 ## ✨ Highlights
 
@@ -91,7 +106,8 @@ The extension now includes a robust chat interface with the following capabiliti
   2. Load a model in the LM Studio UI (optional)
   3. Start the local server (default: `http://localhost:1234`)
   4. Set `private.model.provider.serverUrl` to `http://localhost:1234`
-  
+  5. If using an API key add it to the vscode keyvault using the StatusBar menu
+
   > **Tip:** If tool calling causes errors with your model, disable `private.model.provider.enableToolCalling` in settings.
 
 - Ollama example
@@ -249,4 +265,4 @@ Licensed under the [MIT](LICENSE) license.
 
 ## 💬 Support
 
-- Issues & Feature Requests: https://github.com/krevas/private-model-provider/issues
+- Issues & Feature Requests: https://github.com/fmuntean/private-model-provider/issues
