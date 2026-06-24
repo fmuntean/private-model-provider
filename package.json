@@ -82,16 +82,16 @@
         "title": "View Models & Set Default",
         "category": "Private Model Provider"
       },
-        {
-          "command": "private-model-provider.switchServer",
-          "title": "Switch Server Preset",
-          "category": "Private Model Provider"
-        },
-        {
-          "command": "private-model-provider.selectMcpTools",
-          "title": "Select MCP Tools",
-          "category": "Private Model Provider"
-        },
+      {
+        "command": "private-model-provider.switchServer",
+        "title": "Switch Server Preset",
+        "category": "Private Model Provider"
+      },
+      {
+        "command": "private-model-provider.selectMcpTools",
+        "title": "Select MCP Tools",
+        "category": "Private Model Provider"
+      },
       {
         "command": "private-model-provider.showStats",
         "title": "View Usage Statistics",
@@ -193,13 +193,42 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string", "description": "Human readable server name" },
-              "command": { "type": "string", "description": "Executable command to launch the server" },
-              "args": { "type": "array", "items": { "type": "string" }, "description": "Arguments for the command" },
-              "transport": { "type": "string", "enum": ["stdio","sse","http"], "description": "Transport type" },
-              "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Environment variables" }
+              "name": {
+                "type": "string",
+                "description": "Human readable server name"
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable command to launch the server"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments for the command"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "stdio",
+                  "sse",
+                  "http"
+                ],
+                "description": "Transport type"
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables"
+              }
             },
-            "required": ["name", "command"]
+            "required": [
+              "name",
+              "command"
+            ]
           },
           "order": 10
         },
@@ -207,7 +236,9 @@
           "type": "array",
           "default": [],
           "description": "List of enabled MCP tool names. Only these tools will be sent to the model for tool calling.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "order": 11
         },
         "private.model.provider.smallModel": {
@@ -325,7 +356,9 @@
         "type": "array",
         "default": [],
         "description": "List of MCP tool names that can be enabled/disabled via the UI.",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "order": 4
       }
     }
@@ -336,9 +369,10 @@
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
     "@vscode/vsce": "^3.9.1",
-    "esbuild": "^0.27.2",
+    "esbuild": "^0.28.1",
     "eslint": "^9.39.1",
+    "glob": "^13.0.6",
     "typescript": "^5.7.2",
-    "vsce": "^1.2.0"
+    "commander": "^12.1.0"
   }
 }
