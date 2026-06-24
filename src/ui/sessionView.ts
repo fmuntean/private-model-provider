@@ -101,112 +101,163 @@ export function registerSessionView(
   const sessionViewProvider = new SessionViewProvider(sessionManager);
 
   // Register commands
-  const commands = [
-    vscode.commands.registerCommand('private-model-provider.createSession', async () => {
-      const session = sessionManager.createSession();
-      sessionViewProvider.refresh();
-      vscode.window.showInformationMessage(`Created new session: ${session.title}`);
-      // Notify extension to update webview
-      vscode.commands.executeCommand('localModelProvider.getSessions');
-    }),
-
-    vscode.commands.registerCommand('private-model-provider.switchSession', async (sessionId: string) => {
-      sessionManager.switchSession(sessionId);
-      sessionViewProvider.refresh();
-      // Notify extension to update webview
-      vscode.commands.executeCommand('localModelProvider.getSessions');
-    }),
-
-    vscode.commands.registerCommand('private-model-provider.deleteSession', async (item?: SessionTreeItem) => {
-      let sessionId: string | undefined = item?.session.id;
-      
-      if (!sessionId) {
-        // If no item provided, ask user to select
-        const sessions = sessionManager.getAllSessions();
-        if (sessions.length === 0) {
-          vscode.window.showInformationMessage('No sessions to delete');
-          return;
-        }
-        const selected = await vscode.window.showQuickPick(
-          sessions.map(s => ({ label: s.title, description: s.id })),
-          { placeHolder: 'Select session to delete' }
-        );
-        if (!selected) return;
-        sessionId = selected.description;
-      }
-
-      const confirmed = await vscode.window.showWarningMessage(
-        'Delete this session? This action cannot be undone.',
-        'Delete',
-        'Cancel'
-      );
-      
-      if (confirmed === 'Delete' && sessionId) {
-        sessionManager.deleteSession(sessionId);
-        sessionViewProvider.refresh();
-      }
-    }),
-
-    vscode.commands.registerCommand('private-model-provider.renameSession', async (item?: SessionTreeItem) => {
-      let sessionId: string | undefined = item?.session.id;
-      
-      if (!sessionId) {
-        const sessions = sessionManager.getAllSessions();
-        const selected = await vscode.window.showQuickPick(
-          sessions.map(s => ({ label: s.title, description: s.id })),
-          { placeHolder: 'Select session to rename' }
-        );
-        if (!selected) return;
-        sessionId = selected.description;
-      }
-
-      if (!sessionId) return;
-
-      const session = sessionManager.getActiveSession();
-      if (!session || session.id !== sessionId) {
-        vscode.window.showErrorMessage('Can only rename the active session');
-        return;
-      }
-
-      const newTitle = await vscode.window.showInputBox({
-        prompt: 'Enter new session title',
-        value: session.title,
-        validateInput: (value) => {
-          if (!value || value.trim().length === 0) {
-            return 'Title cannot be empty';
-          }
-          return null;
-        }
-      });
-
-      if (newTitle) {
-        sessionManager.updateSessionTitle(sessionId, newTitle);
-        sessionViewProvider.refresh();
-      }
-    }),
-
-    vscode.commands.registerCommand('private-model-provider.editMasterPrompt', async () => {
-      const promptManager = new PromptManager(context);
-      const masterPrompt = promptManager.getMasterPrompt() || '';
-      
-      const result = await vscode.window.showInputBox({
-        prompt: 'Edit master prompt (saved to .llm/master.md)',
-        value: masterPrompt,
-        validateInput: (value) => null
-      });
-
-      if (result !== undefined) {
-        try {
-          promptManager.saveMasterPrompt(result);
-          vscode.window.showInformationMessage('Master prompt saved to .llm/master.md');
-        } catch (error) {
-          vscode.window.showErrorMessage(`Failed to save master prompt: ${error}`);
-        }
-      }
-    })
-  ];
-
-  commands.forEach(cmd => context.subscriptions.push(cmd));
+  // Register session‑management commands via the centralized `commands` module.
+  // Each helper returns a `vscode.Disposable` which we add to the extension
+  // context's subscriptions for proper cleanup.
+  context.subscriptions.push(
+    registerCreateSession(context, sessionManager, sessionViewProvider),
+    registerSwitchSession(context, sessionManager, sessionViewProvider),
+    registerDeleteSession(context, sessionManager, sessionViewProvider),
+    registerRenameSession(context, sessionManager, sessionViewProvider),
+    registerEditMasterPrompt(context)
+  );
 
   return sessionViewProvider;
+}
+
+
+/**
+ * Registers the "private-model-provider.createSession" command.
+ */
+export function registerCreateSession(
+  context: vscode.ExtensionContext,
+  sessionManager: SessionManager,
+  sessionViewProvider: SessionViewProvider
+): vscode.Disposable {
+  return vscode.commands.registerCommand('private-model-provider.createSession', async () => {
+    const session = sessionManager.createSession();
+    sessionViewProvider.refresh();
+    vscode.window.showInformationMessage(`Created new session: ${session.title}`);
+    // Notify extension to update webview
+    vscode.commands.executeCommand('localModelProvider.getSessions');
+  });
+}
+
+/**
+ * Registers the "private-model-provider.switchSession" command.
+ */
+export function registerSwitchSession(
+  context: vscode.ExtensionContext,
+  sessionManager: SessionManager,
+  sessionViewProvider: SessionViewProvider
+): vscode.Disposable {
+  return vscode.commands.registerCommand('private-model-provider.switchSession', async (sessionId: string) => {
+    sessionManager.switchSession(sessionId);
+    sessionViewProvider.refresh();
+    // Notify extension to update webview
+    vscode.commands.executeCommand('localModelProvider.getSessions');
+  });
+}
+
+/**
+ * Registers the "private-model-provider.deleteSession" command.
+ */
+export function registerDeleteSession(
+  context: vscode.ExtensionContext,
+  sessionManager: SessionManager,
+  sessionViewProvider: SessionViewProvider
+): vscode.Disposable {
+  return vscode.commands.registerCommand('private-model-provider.deleteSession', async (item?: any) => {
+    let sessionId: string | undefined = item?.session?.id;
+
+    if (!sessionId) {
+      // If no item provided, ask user to select
+      const sessions = sessionManager.getAllSessions();
+      if (sessions.length === 0) {
+        vscode.window.showInformationMessage('No sessions to delete');
+        return;
+      }
+      const selected = await vscode.window.showQuickPick(
+        sessions.map(s => ({ label: s.title, description: s.id })),
+        { placeHolder: 'Select session to delete' }
+      );
+      if (!selected) return;
+      sessionId = selected.description;
+    }
+
+    const confirmed = await vscode.window.showWarningMessage(
+      'Delete this session? This action cannot be undone.',
+      'Delete',
+      'Cancel'
+    );
+
+    if (confirmed === 'Delete' && sessionId) {
+      sessionManager.deleteSession(sessionId);
+      sessionViewProvider.refresh();
+    }
+  });
+}
+
+/**
+ * Registers the "private-model-provider.renameSession" command.
+ */
+export function registerRenameSession(
+  context: vscode.ExtensionContext,
+  sessionManager: SessionManager,
+  sessionViewProvider: SessionViewProvider
+): vscode.Disposable {
+  return vscode.commands.registerCommand('private-model-provider.renameSession', async (item?: any) => {
+    let sessionId: string | undefined = item?.session?.id;
+
+    if (!sessionId) {
+      const sessions = sessionManager.getAllSessions();
+      const selected = await vscode.window.showQuickPick(
+        sessions.map(s => ({ label: s.title, description: s.id })),
+        { placeHolder: 'Select session to rename' }
+      );
+      if (!selected) return;
+      sessionId = selected.description;
+    }
+
+    if (!sessionId) return;
+
+    const session = sessionManager.getActiveSession();
+    if (!session || session.id !== sessionId) {
+      vscode.window.showErrorMessage('Can only rename the active session');
+      return;
+    }
+
+    const newTitle = await vscode.window.showInputBox({
+      prompt: 'Enter new session title',
+      value: session.title,
+      validateInput: (value) => {
+        if (!value || value.trim().length === 0) {
+          return 'Title cannot be empty';
+        }
+        return null;
+      },
+    });
+
+    if (newTitle) {
+      sessionManager.updateSessionTitle(sessionId, newTitle);
+      sessionViewProvider.refresh();
+    }
+  });
+}
+
+/**
+ * Registers the "private-model-provider.editMasterPrompt" command.
+ */
+export function registerEditMasterPrompt(
+  context: vscode.ExtensionContext
+): vscode.Disposable {
+  return vscode.commands.registerCommand('private-model-provider.editMasterPrompt', async () => {
+    const promptManager = new PromptManager(context);
+    const masterPrompt = promptManager.getMasterPrompt() || '';
+
+    const result = await vscode.window.showInputBox({
+      prompt: 'Edit master prompt (saved to .llm/master.md)',
+      value: masterPrompt,
+      validateInput: (value) => null,
+    });
+
+    if (result !== undefined) {
+      try {
+        promptManager.saveMasterPrompt(result);
+        vscode.window.showInformationMessage('Master prompt saved to .llm/master.md');
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to save master prompt: ${error}`);
+      }
+    }
+  });
 }
