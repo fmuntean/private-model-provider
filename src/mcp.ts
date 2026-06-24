@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
-import { getLogger } from './logger';
+import { getLogger } from './vscodeLogger';
 
 /**
  * Configuration for a single MCP server.
@@ -75,7 +75,7 @@ export class MCPManager {
     const proc = spawn(cfg.command, cfg.args ?? [], {
       env: { ...process.env, ...(cfg.env ?? {}) },
       stdio: cfg.transport === 'stdio' ? 'pipe' : 'ignore',
-    });
+    }) as ChildProcessWithoutNullStreams;
     proc.on('error', (err) => {
       this.logger.error(`[MCP] Failed to start ${cfg.name}: ${err.message}`);
     });

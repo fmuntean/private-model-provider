@@ -109,7 +109,7 @@ interface ParsedChunk {
 /**
  * HTTP client for OpenAI-compatible inference servers
  */
-export class GatewayClient {
+export class LlmClient {
   private config: GatewayConfig;
   private retryConfig: RetryConfig;
 
@@ -506,7 +506,7 @@ export class GatewayClient {
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
-        headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
+        headers: this.getHeaders(),
         body: JSON.stringify({ ...request, stream: true, stream_options: {include_usage: true } }),
       }, 'Chat completion');
 
@@ -662,6 +662,7 @@ export class GatewayClient {
     }
 
     headers['Accept'] = 'application/json';
+    headers['Content-Type'] = 'application/json';
 
     return headers;
   }
@@ -694,7 +695,7 @@ export class GatewayClient {
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
-        headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
+        headers: this.getHeaders(),
         body: JSON.stringify({ ...request, stream: false }),
       }, 'Complete chat');
 

@@ -13,7 +13,7 @@ import {
   TokenUsageByType,
   SessionManagerEvent
 } from './types';
-import { getLogger } from './logger';
+import { getLogger } from './vscodeLogger';
 import { PromptManager } from './prompts';
 
 const SESSIONS_METADATA_FILE = 'sessions.json';

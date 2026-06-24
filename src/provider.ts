@@ -5,18 +5,18 @@ import { MCPManager } from './mcp';
 import { SecretManager } from './secretManager';
 import { StatisticsManager } from './statistics';
 import { SessionManager } from './sessionManager';
-import { getLogger, Logger } from './logger';
+import { getLogger, Logger } from './vscodeLogger';
 // Added for logging chat history
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
 import { runCopilotTool } from './tools';
+import { IOutputChannel } from './core/interfaces';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
  */
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
-  private readonly client: GatewayClient;
+  private readonly client: LlmClient;
   private readonly mcpManager: MCPManager;
   private config: GatewayConfig;
   private readonly secretManager: SecretManager;
@@ -85,7 +85,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.statsManager = statsManager ?? null;
     this.sessionManager = sessionManager ?? new SessionManager(context);
     this.config = this.loadConfig();
-    this.client = new GatewayClient(this.config, {
+    this.client = new LlmClient(this.config, {
       maxRetries: this.config.maxRetries,
       baseDelayMs: this.config.retryDelayMs,
     });
@@ -265,8 +265,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   /**
    * Get the output channel for external use (e.g., commands)
-   */
-  public getOutputChannel(): vscode.OutputChannel {
+   * @deprecated  This will be removed soon.
+  */
+  public getOutputChannel(): IOutputChannel {
     this.logger.show();
     return this.logger.getOutputChannel();
   }

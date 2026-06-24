@@ -2,8 +2,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { GatewayClient } from './client';
-import { getLogger, Logger } from './logger';
+import { LlmClient } from './llmClient';
+import { getLogger, Logger } from './vscodeLogger';
 
 /**
  * Model-specific prompt file paths and management
@@ -195,7 +195,7 @@ export class PromptManager {
    * Call the LLM to optimize a prompt
    */
   public async optimizePromptWithLLM(
-    client: GatewayClient,
+    client: LlmClient,
     original: string,
     model: vscode.LanguageModelChatInformation,
     type: 'system' | 'title'

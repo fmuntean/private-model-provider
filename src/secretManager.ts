@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getLogger, Logger } from './logger';
+import { getLogger, Logger } from './vscodeLogger';
 
 /**
  * Secret key constants

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { GatewayProvider } from '../provider';
 import { SessionManager } from '../sessionManager';
-import { getLogger, Logger } from '../logger';
+import { getLogger, Logger } from '../vscodeLogger';
 
 /**
  * Webview provider for the chat sidebar
