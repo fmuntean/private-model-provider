@@ -1,24 +1,26 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as path from 'path';
 import { GatewayProvider } from './provider';
 import { StatusBarManager, ServerStatus, ServerPreset } from './statusBar';
 import { StatisticsManager } from './statistics';
 import { SessionManager } from './sessionManager';
 import { registerSessionView } from './ui/sessionView';
 import { registerChatView } from './ui/chatView';
-import { getLogger, Logger } from './logger';
+import { getLogger, Logger } from './vscodeLogger';
 import { PromptManager } from './prompts';
-import { GatewayClient } from './client';
+import { LlmClient } from './llmClient';
+import * as command from './commands';
 
 /**
  * Extension activation
  */
 export function activate(context: vscode.ExtensionContext) {
-  const logger = getLogger();
+  const outputChannel = vscode.window.createOutputChannel('Private LLM');
+  const logger = Logger.getInstance('Private LLM', outputChannel);
+  
   logger.info('Private Model Provider extension is now active');
 
-
+  
   // Create statistics manager
   const statsManager = new StatisticsManager();
   context.subscriptions.push(statsManager);
@@ -38,14 +40,15 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // Create and register the language model provider
+  // This is the provider that handles the communication with 
+  // the inference server when called from other chat extensions 
+  // like Github Copilot Chat
   const provider = new GatewayProvider(context, statsManager, sessionManager);
-
-  const disposable = vscode.lm.registerLanguageModelChatProvider(
+  const chatProvider = vscode.lm.registerLanguageModelChatProvider(
     'private-model-provider',
     provider
   );
-
-  context.subscriptions.push(disposable);
+  context.subscriptions.push(chatProvider);
 
   // Register the chat sidebar webview
   const chatViewProvider = registerChatView(context, provider, sessionManager);
@@ -55,32 +58,8 @@ export function activate(context: vscode.ExtensionContext) {
   const chatViewProviderRef = { current: chatViewProvider };
 
   // Get server URL for status bar
-  const config = vscode.workspace.getConfiguration('private.model.provider');
-  const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
-  statusBar.setStatus(ServerStatus.Unknown, { serverUrl });
-
-  // ---------------------------------------------------------------------
-  // Health‑check: verify server connectivity on activation and when the
-  // server URL changes. The check simply attempts to fetch the model list.
-  // ---------------------------------------------------------------------
-  const runHealthCheck = async () => {
-    try {
-      const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
-      // Silent request – we only care about success/failure
-      const models = await provider.provideLanguageModelChatInformation(
-        { silent: true },
-        new vscode.CancellationTokenSource().token
-      );
-      const modelCount = models.length;
-      statusBar.setStatus(ServerStatus.Connected, { modelCount, serverUrl });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      statusBar.setStatus(ServerStatus.Error, { errorMessage: msg, serverUrl });
-    }
-  };
-
   // Initial health check
-  runHealthCheck();
+  runHealthCheck(statusBar, provider);
 
   // Re‑run health check when the server URL changes
   context.subscriptions.push(
@@ -90,7 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
           .getConfiguration('private.model.provider')
           .get<string>('serverUrl', 'http://localhost:8000');
         statusBar.setStatus(ServerStatus.Unknown, { serverUrl: newUrl });
-        runHealthCheck();
+        runHealthCheck(statusBar, provider);
       }
       // When the default model changes, persist it to the active session
       if (e.affectsConfiguration('private.model.provider.defaultModel')) {
@@ -109,44 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Register command to set API key securely
   const setApiKeyCommand = vscode.commands.registerCommand(
     'private-model-provider.setApiKey',
-    async () => {
-      const secretManager = provider.getSecretManager();
-      const hasExisting = await secretManager.hasApiKey();
-      
-      const placeholder = hasExisting 
-        ? 'Enter new API key (leave empty to remove current key)'
-        : 'Enter your API key for the inference server';
-
-      const apiKey = await vscode.window.showInputBox({
-        prompt: placeholder,
-        password: true,
-        placeHolder: 'sk-...',
-        ignoreFocusOut: true,
-      });
-
-      if (apiKey === undefined) {
-        return; // User cancelled
-      }
-
-      try {
-        await secretManager.setApiKey(apiKey);
-        // Apply the updated key to the running client immediately
-        await provider.refreshApiKey();
-        if (apiKey) {
-          vscode.window.showInformationMessage(
-            'Private Model Provider: API key stored securely.'
-          );
-        } else {
-          vscode.window.showInformationMessage(
-            'Private Model Provider: API key removed.'
-          );
-        }
-      } catch (error) {
-        vscode.window.showErrorMessage(
-          `Private Model Provider: Failed to store API key. ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }
+    async () => command.setApiKey(provider)
   );
 
   // Register command to show status menu
@@ -158,466 +100,47 @@ export function activate(context: vscode.ExtensionContext) {
   // Register command to view and select models
   const selectModelCommand = vscode.commands.registerCommand(
     'private-model-provider.selectModel',
-    async () => {
-      try {
-        const models = await provider.provideLanguageModelChatInformation(
-          { silent: false },
-          new vscode.CancellationTokenSource().token
-        );
-
-        if (models.length === 0) {
-          vscode.window.showWarningMessage('No models available.');
-          return;
-        }
-
-        const currentDefault = vscode.workspace.getConfiguration('private.model.provider')
-          .get<string>('defaultModel', '');
-
-        const items: vscode.QuickPickItem[] = models.map((model) => ({
-          label: model.id === currentDefault ? `$(star-full) ${model.name}` : `$(symbol-method) ${model.name}`,
-          description: model.id === currentDefault ? 'Default' : '',
-          detail: `Max Input: ${model.maxInputTokens} | Max Output: ${model.maxOutputTokens} | Tool Calling: ${model.capabilities?.toolCalling ? 'Yes' : 'No'}`,
-        }));
-
-        const selected = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select a model (selecting sets as default)',
-          title: `Available Models (${models.length})`,
-        });
-
-        if (selected) {
-          const modelName = selected.label.replace(/^\$\([^)]+\)\s*/, '');
-          await vscode.workspace.getConfiguration('private.model.provider')
-            .update('defaultModel', modelName, vscode.ConfigurationTarget.Global);
-          
-          // Immediately update status bar to reflect the change
-          statusBar.setStatus(ServerStatus.Connected, { modelCount: models.length });
-          
-          vscode.window.showInformationMessage(`Default model set to: ${modelName}`);
-        }
-      } catch (error) {
-        vscode.window.showErrorMessage(`Failed to fetch models: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    async () => command.selectModel(provider, statusBar)
   );
 
   // Register command to switch server presets
   const switchServerCommand = vscode.commands.registerCommand(
     'private-model-provider.switchServer',
-    async () => {
-      const logger = getLogger();
-      const config = vscode.workspace.getConfiguration('private.model.provider');
-      const presets = config.get<ServerPreset[]>('serverPresets', []);
-      
-      // Get current URL from actual config (check both workspace and global)
-      const currentUrl = config.get<string>('serverUrl', 'http://localhost:8000');
-      
-      // Log for debugging
-      logger.info(`[Private Model Provider] Current server URL: ${currentUrl}`);
-      logger.info(`[Private Model Provider] Available presets: ${presets.map(p => `${p.name}: ${p.url}`)}`);
-
-      const items: vscode.QuickPickItem[] = [
-        {
-          label: '$(add) Add New Preset',
-          description: 'Create a new server preset',
-          alwaysShow: true,
-        },
-      ];
-
-      // Add delete option if there are presets
-      if (presets.length > 0) {
-        items.push({
-          label: '$(trash) Delete Preset',
-          description: 'Remove a saved preset',
-          alwaysShow: true,
-        });
-      }
-
-      items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
-
-      // Add current server if not in presets
-      const currentInPresets = presets.some(p => p.url === currentUrl);
-      if (!currentInPresets) {
-        items.push({
-          label: `$(check) Current: ${currentUrl}`,
-          description: 'Active',
-          detail: currentUrl,
-        });
-      }
-
-      // Add presets
-      for (const preset of presets) {
-        items.push({
-          label: preset.url === currentUrl ? `$(check) ${preset.name}` : `$(server) ${preset.name}`,
-          description: preset.url === currentUrl ? 'Active' : '',
-          detail: preset.url,
-        });
-      }
-
-      const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select a server preset',
-        title: 'Server Presets',
-      });
-
-      if (!selected) {
-        return;
-      }
-
-      if (selected.label.includes('Add New Preset')) {
-        // Create new preset
-        const name = await vscode.window.showInputBox({
-          prompt: 'Enter preset name',
-          placeHolder: 'e.g., Local vLLM, Ollama, Production',
-        });
-
-        if (!name) return;
-
-        const url = await vscode.window.showInputBox({
-          prompt: 'Enter server URL',
-          placeHolder: 'http://localhost:8000',
-          value: 'http://localhost:8000',
-        });
-
-        if (!url) return;
-
-        const newPreset: ServerPreset = { name, url };
-        const updatedPresets = [...presets, newPreset];
-
-        await config.update('serverPresets', updatedPresets, vscode.ConfigurationTarget.Global);
-
-        // Determine which configuration target to use for serverUrl
-        const inspection = config.inspect<string>('serverUrl');
-        let target = vscode.ConfigurationTarget.Global;
-        
-        if (inspection?.workspaceValue !== undefined) {
-          target = vscode.ConfigurationTarget.Workspace;
-        } else if (inspection?.workspaceFolderValue !== undefined) {
-          target = vscode.ConfigurationTarget.WorkspaceFolder;
-        }
-
-        // Switch to new preset
-        await config.update('serverUrl', url, target);
-        // Ensure provider uses latest configuration immediately
-        provider.applyLatestConfiguration();
-
-        statusBar.setStatus(ServerStatus.Unknown, { serverUrl: url });
-        provider.clearModelCache();
-        
-        // Refresh models from new server
-        vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Switching server and refreshing models...',
-            cancellable: false,
-          },
-          async () => {
-            try {
-              const models = await provider.provideLanguageModelChatInformation(
-                { silent: false },
-                new vscode.CancellationTokenSource().token
-              );
-              statusBar.setStatus(ServerStatus.Connected, { modelCount: models.length });
-              if (models.length > 0) {
-                vscode.window.showInformationMessage(
-                  `Created and switched to: ${name}\nFound ${models.length} model(s)`
-                );
-              } else {
-                vscode.window.showWarningMessage(
-                  `Created and switched to: ${name}\nNo models found.`
-                );
-              }
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
-              statusBar.setStatus(ServerStatus.Error, { errorMessage });
-              vscode.window.showErrorMessage(`Created preset: ${name}\nFailed to fetch models: ${errorMessage}`);
-            }
-          }
-        );
-      } else if (selected.label.includes('Delete Preset')) {
-        // Delete preset
-        const deleteItems: vscode.QuickPickItem[] = presets.map(preset => ({
-          label: `$(server) ${preset.name}`,
-          description: preset.url === currentUrl ? 'Currently active' : '',
-          detail: preset.url,
-        }));
-
-        const toDelete = await vscode.window.showQuickPick(deleteItems, {
-          placeHolder: 'Select preset to delete',
-          title: 'Delete Server Preset',
-        });
-
-        if (!toDelete) return;
-
-        const presetName = toDelete.label.replace(/^\$\([^)]+\)\s*/, '');
-        const confirmed = await vscode.window.showWarningMessage(
-          `Delete preset "${presetName}"?`,
-          { modal: true },
-          'Delete'
-        );
-
-        if (confirmed === 'Delete') {
-          const updatedPresets = presets.filter(p => p.name !== presetName);
-          await vscode.workspace.getConfiguration('private.model.provider')
-            .update('serverPresets', updatedPresets, vscode.ConfigurationTarget.Global);
-          
-          vscode.window.showInformationMessage(`Deleted preset: ${presetName}`);
-        }
-      } else if (selected.detail) {
-        // Check if already on this server
-        if (selected.detail === currentUrl) {
-          vscode.window.showInformationMessage(`Already connected to: ${selected.detail}`);
-          return;
-        }
-
-        // Switch to selected preset
-        logger.info(`[Private Model Provider] Switching from ${currentUrl} to ${selected.detail}`);
-        
-        // Determine which configuration target to use
-        const inspection = config.inspect<string>('serverUrl');
-        let target = vscode.ConfigurationTarget.Global;
-        
-        if (inspection?.workspaceValue !== undefined) {
-          target = vscode.ConfigurationTarget.Workspace;
-        } else if (inspection?.workspaceFolderValue !== undefined) {
-          target = vscode.ConfigurationTarget.WorkspaceFolder;
-        }
-        
-        logger.info(`[Private Model Provider] Updating serverUrl at target: ${target}`);
-        
-        await config.update('serverUrl', selected.detail, target);
-        // Ensure provider uses latest configuration immediately
-        provider.applyLatestConfiguration();
-        
-        // Verify the change
-        const newUrl = vscode.workspace.getConfiguration('private.model.provider')
-          .get<string>('serverUrl');
-        logger.info(`[Private Model Provider] Server URL after update: ${newUrl}`);
-
-        statusBar.setStatus(ServerStatus.Unknown, { serverUrl: selected.detail });
-        provider.clearModelCache();
-        
-        // Refresh models from new server
-        vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Switching server and refreshing models...',
-            cancellable: false,
-          },
-          async () => {
-            try {
-              const models = await provider.provideLanguageModelChatInformation(
-                { silent: false },
-                new vscode.CancellationTokenSource().token
-              );
-              statusBar.setStatus(ServerStatus.Connected, { modelCount: models.length });
-              if (models.length > 0) {
-                vscode.window.showInformationMessage(
-                  `Switched to: ${selected.detail}\nFound ${models.length} model(s)`
-                );
-              } else {
-                vscode.window.showWarningMessage(
-                  `Switched to: ${selected.detail}\nNo models found.`
-                );
-              }
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
-              statusBar.setStatus(ServerStatus.Error, { errorMessage });
-              vscode.window.showErrorMessage(`Switched to: ${selected.detail}\nFailed to fetch models: ${errorMessage}`);
-            }
-          }
-        );
-      }
-    }
-  );
+    async () => command.switchServer(provider, statusBar)
+    );
 
   // Register command to show statistics
   const showStatsCommand = vscode.commands.registerCommand(
     'private-model-provider.showStats',
-    async () => {
-      const stats = statsManager.getSessionStats();
-      const modelStats = statsManager.getModelStats();
-
-      let message = `📊 Session Statistics\n\n`;
-      message += `• Total Requests: ${stats.totalRequests}\n`;
-      message += `• Input Tokens: ${StatisticsManager.formatTokens(stats.totalInputTokens)}\n`;
-      message += `• Output Tokens: ${StatisticsManager.formatTokens(stats.totalOutputTokens)}\n`;
-      message += `• Average Response: ${StatisticsManager.formatDuration(stats.averageResponseTimeMs)}\n`;
-      message += `• Last Response: ${StatisticsManager.formatDuration(stats.lastResponseTimeMs)}\n`;
-      message += `• Session Started: ${stats.sessionStartTime.toLocaleTimeString()}\n`;
-
-      if (modelStats.size > 0) {
-        message += `\n📈 Per-Model Stats:\n`;
-        for (const [modelId, mStats] of modelStats) {
-          message += `\n${modelId}:\n`;
-          message += `  • Requests: ${mStats.requests}\n`;
-          message += `  • Input: ${StatisticsManager.formatTokens(mStats.inputTokens)}\n`;
-          message += `  • Output: ${StatisticsManager.formatTokens(mStats.outputTokens)}\n`;
-        }
-      }
-
-      const action = await vscode.window.showInformationMessage(
-        message,
-        { modal: true },
-        'Reset Statistics'
-      );
-
-      if (action === 'Reset Statistics') {
-        statsManager.resetStats();
-        vscode.window.showInformationMessage('Statistics reset.');
-      }
-    }
+    async () => command.showStats(statsManager)  
   );
 
   // Register command to refresh model cache
   const refreshModelsCommand = vscode.commands.registerCommand(
     'private-model-provider.refreshModels',
-    async () => {
-      vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Refreshing models...',
-          cancellable: false,
-        },
-        async () => {
-          try {
-            const models = await provider.refreshModels();
-            // Update status bar with new model count
-            statusBar.setStatus(ServerStatus.Connected, { modelCount: models.length });
-            // Notify the chat view UI to refresh its model dropdown
-            if (chatViewProviderRef && chatViewProviderRef.current && typeof (chatViewProviderRef.current as any).refreshModels === 'function') {
-              (chatViewProviderRef.current as any).refreshModels();
-            }
-            if (models.length > 0) {
-              vscode.window.showInformationMessage(
-                `Model cache refreshed. Found ${models.length} model(s): ${models.map(m => m.name).join(', ')}`
-              );
-            } else {
-              vscode.window.showWarningMessage(
-                'Model cache refreshed. No models found.'
-              );
-            }
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            statusBar.setStatus(ServerStatus.Error, { errorMessage });
-            vscode.window.showErrorMessage(`Failed to refresh models: ${errorMessage}`);
-          }
-        }
-      );
-    }
+    async () => command.refreshModels(chatViewProviderRef,provider, statusBar)
   );
 
 
   // Register command to generate system prompts using PromptManager
   const generateSystemPromptsCommand = vscode.commands.registerCommand(
     'private-model-provider.generateSystemPrompts',
-    async () => {
-      try {
-        const logger = getLogger();
-
-        // Retrieve models
-        const models = await provider.provideLanguageModelChatInformation(
-          { silent: false },
-          new vscode.CancellationTokenSource().token
-        );
-
-        if (models.length === 0) {
-          vscode.window.showErrorMessage('No models available. Please connect to a server first.');
-          return;
-        }
-
-        const config = vscode.workspace.getConfiguration('private.model.provider');
-        const currentDefault = config.get<string>('defaultModel', '');
-        // The defaultModel configuration stores the model's display name (as set in the dropdown),
-        // not the internal model ID. Match by name to respect the user's selection.
-        const fallbackModel = models.find(m => m.name === currentDefault) || models[0];
-
-        // Get the currently selected model from the chat view UI
-        const chatViewProvider = chatViewProviderRef.current as any;
-        let selectedModel = fallbackModel;
-        
-        if (chatViewProvider && chatViewProvider.getCurrentSelectedModelId) {
-          const currentSelectedModelId = chatViewProvider.getCurrentSelectedModelId();
-          if (currentSelectedModelId) {
-            selectedModel = models.find(m => m.id === currentSelectedModelId) || fallbackModel;
-          }
-        }
-
-        logger.info(`[Private Model Provider] Generating prompts for model: ${selectedModel.name} (${selectedModel.id})`);
-
-        // Use PromptManager for paths and templates
-        const promptManager = new PromptManager(context);
-        const modelId = selectedModel.id;
-        const folderPath = promptManager.getModelPromptFolderPath(modelId);
-        const systemPath = promptManager.getModelPromptFilePath(modelId, 'system');
-        const titlePath = promptManager.getModelPromptFilePath(modelId, 'title');
-
-        // Check for existing prompts
-        if (fs.existsSync(systemPath) || fs.existsSync(titlePath)) {
-          const overwrite = await vscode.window.showWarningMessage(
-            'Optimized prompts already exist for this model. Do you want to overwrite them?',
-            { modal: true },
-            'Overwrite'
-          );
-          if (overwrite !== 'Overwrite') {
-            return;
-          }
-        }
-
-        // Ensure folder exists
-        promptManager.ensureModelPromptFolder(modelId);
-
-        // Read base templates via PromptManager
-        const systemTemplate = promptManager.readBasePromptTemplate('system');
-        const titleTemplate = promptManager.readBasePromptTemplate('title');
-
-        // Optimize using PromptManager's LLM helper
-        const client = (provider as any).client as GatewayClient;
-        const optimizedSystem = await promptManager.optimizePromptWithLLM(client, systemTemplate, selectedModel, 'system');
-        const optimizedTitle = await promptManager.optimizePromptWithLLM(client, titleTemplate, selectedModel, 'title');
-
-        // Save prompts
-        promptManager.saveModelPromptFile(modelId, 'system', optimizedSystem);
-        promptManager.saveModelPromptFile(modelId, 'title', optimizedTitle);
-
-        vscode.window.showInformationMessage(
-          `Optimized prompts saved for model ${selectedModel.name} in ${folderPath}`
-        );
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        vscode.window.showErrorMessage(`Failed to generate system prompts: ${errorMessage}`);
-        const logger = getLogger();
-        logger.error(`[Private Model Provider] Failed to generate prompts: ${errorMessage}`);
-      }
-    }
+    async () => command.generateSystemPrompts(context, provider, chatViewProviderRef)
   );
 
   // Register command to test server connection
   const testConnectionCommand = vscode.commands.registerCommand(
     'private-model-provider.testConnection',
-    async () => {
-      try {
-        // Ensure we fetch fresh model information, bypassing any cached list
-        provider.clearModelCache();
-        // Attempt a silent fetch of models to verify connectivity
-        await provider.provideLanguageModelChatInformation(
-          { silent: true },
-          new vscode.CancellationTokenSource().token
-        );
-        vscode.window.showInformationMessage('Private Model Provider: Connection successful');
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Private Model Provider: Connection failed – ${msg}`);
-      }
-    }
+    async () => command.testConnection(provider)
   );
-
-
 
 
   // Register command to show output channel
   const showOutputCommand = vscode.commands.registerCommand(
     'private-model-provider.showOutput',
     () => {
-      provider.getOutputChannel().show();
+      //provider.getOutputChannel().show();
+      outputChannel.show();
     }
   );
 
@@ -626,78 +149,29 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(testConnectionCommand);     // Add test connection command to subscriptions
   context.subscriptions.push(selectModelCommand);
   context.subscriptions.push(switchServerCommand);
-  // Register command to allow users to select which MCP tools are enabled
-  const selectMcpToolsCommand = vscode.commands.registerCommand(
-    'private-model-provider.selectMcpTools',
-    async () => {
-      // Access the MCP manager attached to the provider (may be undefined if MCP is not configured)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mcpMgr: any = (provider as any)['mcpManager'];
-      if (!mcpMgr || typeof mcpMgr.getToolDefinitions !== 'function') {
-        vscode.window.showWarningMessage('MCP manager not available – no tools to select');
-        return;
-      }
-
-      const allTools = mcpMgr.getToolDefinitions();
-      const toolNames = allTools.map((t: any) => t.function?.name ?? t.name);
-      const config = vscode.workspace.getConfiguration('private.model.provider');
-      const enabled: string[] = config.get<string[]>('enabledMcpTools', []);
-
-      const items: vscode.QuickPickItem[] = toolNames.map((name: string) => ({
-        label: name,
-      }));
-
-      const selected = await vscode.window.showQuickPick(items, {
-        canPickMany: true,
-        placeHolder: 'Select MCP tools to enable for tool calling',
-      });
-
-      if (!selected) {
-        return; // user cancelled
-      }
-
-      const newEnabled = selected.map((s) => s.label);
-      await config.update('enabledMcpTools', newEnabled, vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('MCP tool selection updated');
-    }
-  );
+  
   // ---------------------------------------------------------------
   // MCP Server management commands
   // ---------------------------------------------------------------
+
+  // Register command to allow users to select which MCP tools are enabled
+  const selectMcpToolsCommand = vscode.commands.registerCommand(
+    'private-model-provider.selectMcpTools',
+    async () => command.selectMcpTools(provider)
+  );
+  
+
   const startMcpCommand = vscode.commands.registerCommand(
     'private-model-provider.startMcpServers',
-    async () => {
-      try {
-        // Access the private mcpManager via bracket notation to avoid TS errors
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mcpMgr: any = (provider as any)['mcpManager'];
-        if (mcpMgr && typeof mcpMgr.startAll === 'function') {
-          await mcpMgr.startAll();
-          vscode.window.showInformationMessage('MCP servers started');
-        } else {
-          vscode.window.showWarningMessage('MCP manager not available');
-        }
-      } catch (e) {
-        vscode.window.showErrorMessage(`Failed to start MCP servers: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
+    async () => command.startMcpServers(provider)
   );
+
   const stopMcpCommand = vscode.commands.registerCommand(
     'private-model-provider.stopMcpServers',
-    async () => {
-      try {
-        const mcpMgr: any = (provider as any)['mcpManager'];
-        if (mcpMgr && typeof mcpMgr.stopAll === 'function') {
-          await mcpMgr.stopAll();
-          vscode.window.showInformationMessage('MCP servers stopped');
-        } else {
-          vscode.window.showWarningMessage('MCP manager not available');
-        }
-      } catch (e) {
-        vscode.window.showErrorMessage(`Failed to stop MCP servers: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
+    async () => command.stopMcpServers(provider)
   );
+
+
   // Register MCP server management commands
   context.subscriptions.push(startMcpCommand);
   context.subscriptions.push(stopMcpCommand);
@@ -735,3 +209,27 @@ export function deactivate() {
   logger.info('Private Model Provider extension is now deactivated');
 }
 
+
+  // ---------------------------------------------------------------------
+  // Health‑check: verify server connectivity on activation and when the
+  // server URL changes. The check simply attempts to fetch the model list.
+  // ---------------------------------------------------------------------
+  async function runHealthCheck(statusBar: StatusBarManager, provider: GatewayProvider) {
+    const config = vscode.workspace.getConfiguration('private.model.provider');
+    const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
+    statusBar.setStatus(ServerStatus.Unknown, { serverUrl });
+
+    try {
+      const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
+      // Silent request – we only care about success/failure
+      const models = await provider.provideLanguageModelChatInformation(
+        { silent: true },
+        new vscode.CancellationTokenSource().token
+      );
+      const modelCount = models.length;
+      statusBar.setStatus(ServerStatus.Connected, { modelCount, serverUrl });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      statusBar.setStatus(ServerStatus.Error, { errorMessage: msg, serverUrl });
+    }
+  };
