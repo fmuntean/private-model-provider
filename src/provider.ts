@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { GatewayClient } from './client';
-import { GatewayConfig, OpenAIChatCompletionRequest, ChatMessageType, ChatSession, MessageChunk } from './types';
+import { GatewayConfig, OpenAIChatCompletionRequest, ChatMessageType, ChatSession, MessageChunk, ModelInfo } from './types';
 import { MCPManager } from './mcp';
 import { SecretManager } from './secretManager';
 import { StatisticsManager } from './statistics';
@@ -9,11 +8,28 @@ import { getLogger, Logger } from './vscodeLogger';
 // Added for logging chat history
 import * as fs from 'fs';
 import * as path from 'path';
-import { runCopilotTool } from './tools';
+import { runCopilotTool,runInTerminalLocal } from './tools';
+import { LlmClient } from './core/llmClient';
 import { IOutputChannel } from './core/interfaces';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
+ */
+/**
+ * {@link GatewayProvider} is the concrete implementation of VS Code's
+ * {@link vscode.LanguageModelChatProvider} API. It is registered in
+ * {@link src/extension.ts} via `vscode.lm.registerLanguageModelChatProvider`
+ * under the provider id `private-model-provider`.
+ *
+ * The VS Code Copilot Chat extension discovers language model providers
+ * through this registration. When a user opens a Copilot Chat session, the
+ * extension queries the provider for available models via
+ * {@link provideLanguageModelChatInformation} and then streams chat
+ * completions using {@link provideLanguageModelChatResponse}.
+ *
+ * The provider handles configuration, secret management, model caching,
+ * tool calling, and streaming of responses from the underlying inference
+ * server (via {@link LlmClient}).
  */
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: LlmClient;
@@ -639,7 +655,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
     // Variable to hold final usage object from client stream
     let usage: any = undefined;
-    for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
+    // Create an AbortController to bridge VS Code CancellationToken to AbortSignal
+    const abortCtrl = new AbortController();
+    // When the VS Code token signals cancellation, abort the controller
+    token.onCancellationRequested(() => abortCtrl.abort());
+    for await (const chunk of this.client.streamChatCompletion(requestOptions, abortCtrl.signal)) {
       if (token.isCancellationRequested) {
         break;
       }
@@ -756,7 +776,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           const { command, cwd, timeout } = args as any;
           try {
             // Import the local helper to execute the command and capture output
-            const { runInTerminalLocal } = await import('./tools');
+            //const { runInTerminalLocal } = await import('./tools');
             const result = await runInTerminalLocal(command, { cwd, timeout });
             return result;
           } catch (localErr) {
@@ -777,6 +797,23 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   /**
    * Provide language model information - fetches available models from inference server
    */
+  /**
+   * VS Code calls this method to discover the language model(s) offered by the
+   * provider. It must return a list of {@link vscode.LanguageModelChatInformation}
+   * objects describing each model (id, name, token limits, capabilities, etc.).
+   *
+   * The implementation ensures that any asynchronous initialization (e.g. loading
+   * the API key) has completed, then attempts to fetch the model list from the
+   * underlying inference server via {@link LlmClient.fetchModels}. Results are
+   * cached for {@link GatewayConfig.modelCacheTtlMs} milliseconds to avoid
+   * unnecessary network requests.
+   *
+   * @param options - Configuration for the request. The `silent` flag indicates
+   *   whether UI error messages should be suppressed if the fetch fails.
+   * @param token - VS Code cancellation token. The method respects cancellation
+   *   by aborting any ongoing network request when the token is signaled.
+   * @returns A promise that resolves to an array of model information objects.
+   */
   async provideLanguageModelChatInformation(
     options: { silent: boolean; },
     token: vscode.CancellationToken
@@ -790,16 +827,56 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
     // Check cache first
     const now = Date.now();
-    if (this.cachedModels && this.config.modelCacheTtlMs > 0 && 
+    if (this.cachedModels && this.config.modelCacheTtlMs > 0 &&
         (now - this.modelCacheTimestamp) < this.config.modelCacheTtlMs) {
       this.logger.debug(`Using cached models (${this.cachedModels.length} models, cache age: ${now - this.modelCacheTimestamp}ms)`);
       return this.cachedModels;
     }
 
-    try {
-      this.logger.info('Fetching models from inference server...');
-      const response = await this.client.fetchModels();
+    // Helper to map raw model data to VS Code model info
+    const mapToModelInfo = (raw: any): vscode.LanguageModelChatInformation => {
+      const base: ModelInfo = {
+        id: raw.id ?? raw.key ?? '',
+        object: raw.object ?? 'model',
+        created: raw.created ?? 0,
+        owned_by: raw.publisher ?? '',
+        // Fields required by VS Code
+        name: raw.display_name ?? raw.key ?? '',
+        family: raw.architecture ?? 'private-model-provider',
+        maxInputTokens: raw.max_context_length ?? this.config.defaultMaxTokens,
+        maxOutputTokens: raw.max_output_tokens ?? this.config.defaultMaxOutputTokens,
+        version: raw.version ?? '1.0.0',
+        capabilities: {
+          toolCalling: raw.capabilities?.trained_for_tool_use ?? this.config.enableToolCalling,
+          ...raw.capabilities,
+        },
+        tooltip: raw.tooltip ?? '',
+        detail: raw.description ?? '',
+      };
+      // Cast to the VS Code interface (they share the same shape)
+      return base as unknown as vscode.LanguageModelChatInformation;
+    };
 
+    // Try LM Studio endpoint first
+    try {
+      this.logger.info('Fetching models from LM Studio endpoint...');
+      const lmResponse = await this.client.fetchLMStudioModels();
+      const rawModels: any[] = lmResponse?.models ?? [];
+      const models: vscode.LanguageModelChatInformation[] = rawModels.map(mapToModelInfo);
+      // Update cache
+      this.cachedModels = models;
+      this.modelCacheTimestamp = now;
+      this.logger.info(`Found ${models.length} LM Studio models: ${models.map(m => m.id).join(', ')}`);
+      return models;
+    } catch (lmError) {
+      this.logger.warn(`LM Studio models fetch failed, falling back to OpenAI endpoint: ${lmError instanceof Error ? lmError.message : lmError}`);
+      // Continue to fallback
+    }
+
+    // Fallback to OpenAI compatible endpoint
+    try {
+      this.logger.info('Fetching models from OpenAI compatible endpoint...');
+      const response = await this.client.fetchModels();
       const models = response.data.map((model) => {
         const modelInfo: vscode.LanguageModelChatInformation = {
           id: model.id,
@@ -809,18 +886,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           maxOutputTokens: this.config.defaultMaxOutputTokens,
           version: '1.0.0',
           capabilities: {
-            toolCalling: this.config.enableToolCalling
+            toolCalling: this.config.enableToolCalling,
           },
-        };
-
-        return modelInfo;
+          // Preserve any extra OpenAI fields for completeness
+          object: model.object,
+          created: model.created,
+          owned_by: model.owned_by,
+        } as any;
+        return modelInfo as vscode.LanguageModelChatInformation;
       });
-
       // Update cache
       this.cachedModels = models;
       this.modelCacheTimestamp = now;
-
-      this.logger.info(`Found ${models.length} models: ${models.map(m => m.id).join(', ')}`);
+      this.logger.info(`Found ${models.length} OpenAI models: ${models.map(m => m.id).join(', ')}`);
       return models;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -835,7 +913,6 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
         });
       }
-
       return [];
     }
   }
@@ -1266,7 +1343,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       let totalReasoningContent = '';
       let totalToolCalls = 0;
 
-      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, token)) {
+      // Bridge VS Code CancellationToken to AbortSignal for the client
+      const abortCtrl1 = new AbortController();
+      token.onCancellationRequested(() => abortCtrl1.abort());
+      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, abortCtrl1.signal)) {
         if (token.isCancellationRequested) { break; }
 
         // Handle reasoning/thinking content from the model
@@ -1755,7 +1835,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         }
       };
 
-      for await (const chunk of this.client.streamChatCompletion(requestOptions, token)) {
+      // Bridge VS Code CancellationToken to AbortSignal for the client
+      const abortCtrl2 = new AbortController();
+      if (typeof token.onCancellationRequested === 'function') {
+        token.onCancellationRequested(() => abortCtrl2.abort());
+      } else if (typeof (token as any).onCancelled === 'function') {
+        (token as any).onCancelled(() => abortCtrl2.abort());
+      }
+      for await (const chunk of this.client.streamChatCompletion(requestOptions, abortCtrl2.signal)) {
           // Check for cancellation at the start of each iteration
           if (token.isCancellationRequested) {
             this.logger.info('Streaming cancelled by user (detected in loop)');

@@ -65,6 +65,39 @@ export interface OpenAIModel {
   owned_by: string;
 }
 
+/**
+ * Extends the basic OpenAI model definition with the additional fields
+ * required by VS Code's {@link vscode.LanguageModelChatInformation}.
+ *
+ * The extension fetches models from an OpenAI‑compatible endpoint and then
+ * enriches the result with configuration‑derived defaults (e.g. token limits,
+ * family name, capabilities).  By defining a dedicated interface we keep the
+ * mapping logic type‑safe and self‑documenting.
+ */
+export interface ModelInfo extends OpenAIModel {
+  /** Human‑readable name of the model (used for UI dropdowns). */
+  name: string;
+  /** Opaque family identifier – e.g. "private-model-provider". */
+  family: string;
+  /** Maximum number of input tokens the model can accept. */
+  maxInputTokens: number;
+  /** Maximum number of tokens the model can generate. */
+  maxOutputTokens: number;
+  /** Model version string (e.g. "1.0.0"). */
+  version: string;
+  /** Capabilities supported by the model (tool calling, etc.). */
+  capabilities: {
+    /** Indicates whether the model supports tool calling. */
+    toolCalling?: boolean;
+    // Additional capability flags can be added here without breaking the type.
+    [key: string]: any;
+  };
+  /** Optional tooltip displayed in the UI when hovering the model. */
+  tooltip?: string;
+  /** Optional detail string rendered alongside the model name. */
+  detail?: string;
+}
+
 export interface OpenAIModelsResponse {
   object: string;
   data: OpenAIModel[];

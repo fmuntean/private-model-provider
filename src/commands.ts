@@ -6,7 +6,7 @@ import { StatisticsManager } from './statistics';
 import { ChatSideBarProvider } from './ui/chatView';
 import * as fs from 'fs';
 import { PromptManager } from './prompts';
-import { LlmClient } from './llmClient';
+import { LlmClient } from './core/llmClient';
 
 /**
  * Implements the "private-model-provider.selectMcpTools" command.

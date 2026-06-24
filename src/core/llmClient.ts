@@ -234,6 +234,48 @@ export class LlmClient {
     }
   }
 
+  /**
+   * Fetch available models from LM Studio's `/api/v1/models` endpoint.
+   * This endpoint returns richer model metadata (including token limits).
+   * The response shape is not strictly defined here – we treat it as any and
+   * let the caller map the fields to the VS Code model interface.
+   */
+  public async fetchLMStudioModels(): Promise<any> {
+    // LM Studio uses a slightly different base path for its REST API.
+    const url = `${this.config.serverUrl}/api/v1/models`;
+    try {
+      const response = await this.fetchWithRetry(url, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      }, 'Fetch LM Studio models');
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new GatewayError(
+          `Failed to fetch LM Studio models: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`,
+          response.status,
+          this.isRetryableError(null, response.status)
+        );
+      }
+
+      // The LM Studio endpoint returns a JSON object with a `data` array similar to OpenAI.
+      return await response.json();
+    } catch (error) {
+      if (error instanceof GatewayError) {
+        throw error;
+      }
+      if (error instanceof Error) {
+        throw new GatewayError(
+          `Failed to connect to LM Studio server: ${error.message}`,
+          undefined,
+          this.isRetryableError(error),
+          error
+        );
+      }
+      throw error;
+    }
+  }
+
   /** Create initial tool call tracking state */
   private createToolCallState(): ToolCallState {
     return {

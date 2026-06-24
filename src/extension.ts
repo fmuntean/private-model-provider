@@ -8,7 +8,7 @@ import { registerSessionView } from './ui/sessionView';
 import { registerChatView } from './ui/chatView';
 import { getLogger, Logger } from './vscodeLogger';
 import { PromptManager } from './prompts';
-import { LlmClient } from './llmClient';
+import { LlmClient } from './core/llmClient';
 import * as command from './commands';
 
 /**
