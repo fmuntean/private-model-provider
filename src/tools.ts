@@ -74,13 +74,13 @@ export async function readFile(
     startLine: number = 1,
     endLine: number = Number.MAX_SAFE_INTEGER
 ): Promise<string> {
-    const result = await runCopilotTool<any>('readFile', {
+    const result = await runCopilotTool('readFile', {
         filePath,
         startLine,
         endLine,
     });
     // The tool returns an object with a `content` field containing the text.
-    return result?.content ?? '';
+    return (result as any)?.content ?? '';
 }
 
 /** Apply a patch to a file using the Copilot applyPatch tool. */
@@ -88,7 +88,7 @@ export async function applyPatch(
     explanation: string,
     patch: string
 ): Promise<any> {
-    return runCopilotTool<any>('applyPatch', { explanation, input: patch });
+    return runCopilotTool('applyPatch', { explanation, input: patch });
 }
 
 /** Run a command in the integrated terminal. */
@@ -99,7 +99,7 @@ export async function runInTerminal(
     mode: 'sync' | 'async' = 'sync',
     timeout?: number
 ): Promise<any> {
-    return runCopilotTool<any>('runInTerminal', {
+    return runCopilotTool('runInTerminal', {
         command,
         explanation,
         goal,
@@ -110,17 +110,17 @@ export async function runInTerminal(
 
 /** Retrieve output from a terminal started with runInTerminal (async mode). */
 export async function getTerminalOutput(id: string): Promise<any> {
-    return runCopilotTool<any>('getTerminalOutput', { id });
+    return runCopilotTool('getTerminalOutput', { id });
 }
 
 /** Perform a semantic search across the workspace. */
 export async function semanticSearch(query: string): Promise<any> {
-    return runCopilotTool<any>('semanticSearch', { query });
+    return runCopilotTool('semanticSearch', { query });
 }
 
 /** Ask the user a series of questions via the Copilot UI. */
 export async function askQuestions(questions: any[]): Promise<any> {
-    return runCopilotTool<any>('vscodeAskQuestions', { questions });
+    return runCopilotTool('vscodeAskQuestions', { questions });
 }
 
 

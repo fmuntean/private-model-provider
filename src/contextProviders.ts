@@ -52,7 +52,7 @@ export class CodeContextProvider implements ContextProvider {
   async getContext(): Promise<string> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      return 'No active editor – cannot provide code context.';
+      return 'No active editor - cannot provide code context.';
     }
     const doc = editor.document;
     const line = editor.selection.active.line;
@@ -79,7 +79,7 @@ export class DiffContextProvider implements ContextProvider {
         if (error) {
           resolve(`Failed to get git diff: ${stderr || error.message}`);
         } else if (!stdout) {
-          resolve('No git diff – working tree clean.');
+          resolve('No git diff - working tree clean.');
         } else {
           resolve(`Git diff context:\n\n${stdout}`);
         }
