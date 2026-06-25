@@ -156,6 +156,14 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                                             });
                                             return;
                                         }
+                                        if (chunk.type === 'reasoning') {
+                                            this.webviewView.webview.postMessage({
+                                                type: 'reasoningChunk',
+                                                content: chunk.content,
+                                                sessionId: message.sessionId
+                                            });
+                                            return;
+                                        }
                                         if (chunk.content) {
                                             this.webviewView.webview.postMessage({
                                                 type: 'messageChunk',

@@ -28,6 +28,8 @@ const modelSelect = document.getElementById('model-select');
 let chatContainer = null;
 let currentSessionId = null;
 let userSelectedSession = false;
+let currentThinkingBox = null;
+let currentAgentBox = null;
 
 // Initialize button states (send visible, stop hidden)
 function initializeButtons() {
@@ -227,7 +229,8 @@ window.addEventListener('message', event => {
         models.forEach(model => {
             const option = document.createElement('option');
             option.value = model.id;
-            option.textContent = model.id;
+            option.textContent = model.name || model.id;
+            option.title = model.tooltip || '';
             if (model.id === msg.defaultModel) {
                 option.selected = true;
             }
@@ -261,6 +264,11 @@ window.addEventListener('message', event => {
     if (msg.type === 'messageResponse') {
         // Received response from the model
         log('info', `Received message response: ${msg.content?.substring(0, 50)}...`);
+        // Collapse any existing thinking box before showing the normal assistant message
+        if (currentThinkingBox) {
+            currentThinkingBox.classList.add('collapsed');
+            currentThinkingBox = null; // Clear reference to the thinking box
+        }
         if (chatContainer) {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message agent';
@@ -272,10 +280,15 @@ window.addEventListener('message', event => {
         }
     }
 
-    // New streaming chunk handling
+    // Streaming chunk handling
     if (msg.type === 'messageChunk') {
         // Append incremental content to the last assistant message or create one
         if (!chatContainer) return;
+        // Collapse any existing thinking box when a normal chunk arrives
+        if (currentThinkingBox) {
+            currentThinkingBox.classList.add('collapsed');
+            currentThinkingBox = null; // Clear reference to the thinking box
+        }
         // Find the last assistant message element, or create a new one if none
         let lastAgentMsg = chatContainer.querySelector('.message.agent:last-child, .message.prompt:last-child');
         if (!lastAgentMsg) {
@@ -288,6 +301,32 @@ window.addEventListener('message', event => {
         lastAgentMsg.textContent += msg.content || '';
         // Scroll into view
         lastAgentMsg.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    if (msg.type === 'reasoningChunk') {
+        // Handle reasoning/thinking chunks - display in a thinking box
+        if (!chatContainer) return;
+        
+        // If we don't have a thinking box yet, create one
+        if (!currentThinkingBox) {
+            currentThinkingBox = document.createElement('div');
+            currentThinkingBox.className = 'message thinking';
+            currentThinkingBox.innerHTML = '<strong>Thinking:</strong><br>';
+            // Allow user to toggle collapse/expand by clicking; use function to reference the element itself
+            currentThinkingBox.addEventListener('click', function () {
+                this.classList.toggle('collapsed');
+            });
+            chatContainer.appendChild(currentThinkingBox);
+        } else {
+            // Ensure the box is expanded when new reasoning arrives
+            currentThinkingBox.classList.remove('collapsed');
+        }
+        
+        // Append the reasoning content to the thinking box
+        currentThinkingBox.innerHTML += msg.content || '';
+        // Scroll into view
+        currentThinkingBox.scrollIntoView({ behavior: 'smooth', block: 'end' });
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 

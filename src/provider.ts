@@ -850,7 +850,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           toolCalling: raw.capabilities?.trained_for_tool_use ?? this.config.enableToolCalling,
           ...raw.capabilities,
         },
-        tooltip: raw.tooltip ?? '',
+        tooltip: raw.description ?? '',
         detail: raw.description ?? '',
       };
       // Cast to the VS Code interface (they share the same shape)
@@ -1850,6 +1850,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
             break;
           }
           
+          if (chunk.reasoning_content) {
+            onChunk({ content: chunk.reasoning_content, type:'reasoning' });
+          }
+
           // Forward normal content chunks
           if (chunk.content) {
             fullContent += chunk.content;

@@ -267,6 +267,60 @@ body {
     margin-right: auto;
 }
 
+/* Thinking box for reasoning chunks – similar styling to system prompts but always expanded */
+/* Thinking box for reasoning chunks – left-aligned like agent messages */
+.message.thinking {
+    /* Align to the left (flex-start) – same as .message.agent */
+    align-self: flex-start;
+    /* Ensure content wraps and respects whitespace */
+    white-space: pre-wrap;
+    overflow: visible;
+    cursor: default;
+    /* Use same transition as prompt for consistency (though not collapsed) */
+    transition: max-height 0.2s ease;
+    box-sizing: border-box;
+    /* Border similar to system prompt */
+    border: 1px solid var(--vscode-button-background);
+    /* Width similar to agent messages */
+    width: 90%;
+    max-width: 90%;
+    margin-left: 0;
+    margin-right: auto;
+    /* Inherit base .message padding, border-radius, etc. */
+    /* No additional padding needed as .message already defines it */
+}
+
+/* Collapsed thinking box – hidden overflow with a fixed height, similar to system prompt */
+/* Collapsed thinking box – left-aligned like agent messages */
+.message.thinking.collapsed {
+    align-self: flex-start;
+    text-align: left;
+    max-height: 1.5em;
+    overflow: hidden;
+    cursor: pointer;
+    /* Hide original text while showing placeholder */
+    color: transparent;
+    position: relative;
+    /* Width similar to agent messages */
+    width: 90%;
+    max-width: 90%;
+    margin-left: 0;
+    margin-right: auto;
+}
+
+/* Placeholder shown when a thinking box is collapsed */
+/* Placeholder shown when a thinking box is collapsed – left-aligned */
+.message.thinking.collapsed::after {
+    content: "Thinking ...";
+    color: var(--vscode-descriptionForeground);
+    position: absolute;
+    left: 4px; /* small left padding to match message padding */
+    right: auto;
+    top: 0;
+    text-align: left;
+    white-space: nowrap;
+}
+
 /* Collapsed system prompt – hidden overflow with a fixed height */
 .message.prompt.collapsed {
     align-self: center;
