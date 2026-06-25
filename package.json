@@ -2,7 +2,7 @@
   "name": "private-model-provider",
   "displayName": "MFD: Private Model Provider",
   "description": "VS Code extension to connect to private or local LLM inference servers (Ollama, llama.cpp, LocalAI, LM Studio, vLLM) via OpenAI API compatible endpoints.",
-  "version": "1.1.3",
+  "version": "1.1.12",
   "publisher": "mfd",
   "icon": "assets/private-model-provider.png",
   "private": true,
@@ -16,9 +16,9 @@
   },
   "files": [
     "out",
-    "src",
     "PromptTemplates",
     "assets",
+    "src/ui/assets",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -29,6 +29,7 @@
     "esbuild": "npm run esbuild-base -- --sourcemap",
     "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
     "test-compile": "tsc -p ./",
+    "prepackage": "npm version patch --no-git-tag-version",
     "deploy": "vsce publish --no-yarn",
     "package": "vsce package --no-yarn"
   },

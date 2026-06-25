@@ -15,7 +15,7 @@ Thank you for your interest in contributing to Private Model Provider! This docu
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/krevas/private-model-provider.git
+   git clone https://github.com/fmuntean/private-model-provider.git
    cd private-model-provider
    ```
 
@@ -33,6 +33,11 @@ Thank you for your interest in contributing to Private Model Provider! This docu
    - Press `F5` in VS Code to launch the Extension Development Host
    - Or run `npm run esbuild-watch` for continuous builds
 
+5. **Package the extension (VSIX)**
+    ```bash
+    npm run package
+    ```
+    This runs `vsce package --no-yarn` (vsce is a dev‑dependency). It creates a `.vsix` file (e.g., `private-model-provider-1.1.3.vsix`) in the project root. You can install it locally via **Extensions → Install from VSIX...** or publish it to the Marketplace with `npm run deploy`.
 ### Project Structure
 
 ```
