@@ -338,7 +338,7 @@ window.addEventListener('message', event => {
         if (lastAgentMsg && msg.usage) {
             const usageDiv = document.createElement('div');
             usageDiv.className = 'usage-info';
-            usageDiv.textContent = `Tokens used: ${msg.usage.total_tokens || ''}`;
+            usageDiv.textContent = `Tokens used: ${msg.usage.total_tokens || ''} (${msg.usage.tokenSpeed.toFixed(2)} tps)`;
             lastAgentMsg.appendChild(usageDiv);
         }
         if (msg.cancelled) {

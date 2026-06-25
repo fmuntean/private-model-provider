@@ -514,8 +514,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (message.tool_calls) {
       text += JSON.stringify(message.tool_calls);
     }
-    // Rough estimate: ~4 characters per token
-    return Math.ceil(text.length / 4);
+    // Rough estimate: ~4 or 5 characters per token
+    return Math.ceil(text.length / 5);
   }
 
   /**
@@ -1766,7 +1766,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       model: targetModelId,
       messages: openAIMessages,
       max_tokens: this.config.defaultMaxOutputTokens || 2048,
-      temperature: 0.7,
+      temperature: this.config.agentTemperature || 0.1,
       stream: true,
       stream_options: { include_usage: true }
     };
@@ -1842,6 +1842,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       } else if (typeof (token as any).onCancelled === 'function') {
         (token as any).onCancelled(() => abortCtrl2.abort());
       }
+      const requestStartTime = Date.now();
+      //starting the streaming request to the inference server...
       for await (const chunk of this.client.streamChatCompletion(requestOptions, abortCtrl2.signal)) {
           // Check for cancellation at the start of each iteration
           if (token.isCancellationRequested) {
@@ -1893,6 +1895,19 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           // Check if usage is included in the chunk (final chunk)
           if (chunk.usage) {
             finalUsage = chunk.usage;
+            
+            // Calculate token speed: tokens per second
+            const durationMs = Date.now() - requestStartTime;
+            const completionTokens = chunk.usage.completion_tokens || 0;
+            if (durationMs > 0 && completionTokens > 0) {
+              const tokensPerSecond = completionTokens / (durationMs / 1000);
+              // Add token speed to usage object
+              finalUsage.tokenSpeed = tokensPerSecond;
+              
+              // Also add duration for UI display
+              finalUsage.durationMs = durationMs;
+            }
+            
             onChunk({ usage: chunk.usage, done: true });
             doneSent = true;
           }
