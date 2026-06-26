@@ -128,10 +128,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           // General configuration changes (server URL, default model, etc.)
           if (e.affectsConfiguration('private.model.provider')) {
             this.logger.info('Configuration changed, reloading...');
-            this.reloadConfig();
-            // Clear model cache on config change
-            this.cachedModels = null;
-            this.modelCacheTimestamp = 0;
+            void this.applyLatestConfiguration();
           }
 
           // Specific handling for MCP server definitions – restart servers so
@@ -267,9 +264,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    * to ensure subsequent operations use the latest config without
    * waiting for VS Code config change events.
    */
-  public applyLatestConfiguration(): void {
+  public async applyLatestConfiguration(): Promise<void> {
     // Reuse existing reload logic
     this.reloadConfig();
+    // Refresh API key to ensure latest value is used
+    await this.refreshApiKey();
+    // Clear model cache on config change
+    this.cachedModels = null;
+    this.modelCacheTimestamp = 0;
   }
 
   /**
@@ -1478,17 +1480,24 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private loadConfig(): GatewayConfig {
     const config = vscode.workspace.getConfiguration('private.model.provider');
+    const previousApiKey = this.config?.apiKey ?? '';
 
-    // Normalize server URL (strip trailing /v1 to avoid double path like /v1/v1)
+    // Normalize server URL (remove trailing slash and optional /v1 segment)
     let serverUrlRaw = config.get<string>('serverUrl', 'http://localhost:8000');
+    // Remove trailing /v1 if present
     if (/\/v1\/?$/.test(serverUrlRaw)) {
       serverUrlRaw = serverUrlRaw.replace(/\/v1\/?$/, '');
       this.logger.info('NOTE: Stripped trailing /v1 from serverUrl setting to avoid duplicated path.');
     }
+    // Remove any trailing slash
+    if (/\/$/.test(serverUrlRaw)) {
+      serverUrlRaw = serverUrlRaw.replace(/\/+$/, '');
+      this.logger.info('NOTE: Stripped trailing slash from serverUrl setting.');
+    }
 
     const cfg: GatewayConfig = {
       serverUrl: serverUrlRaw,
-      apiKey: '', // Loaded from SecretStorage via initializeApiKey()
+      apiKey: previousApiKey,
       requestTimeout: config.get<number>('requestTimeout', 60000),
       defaultMaxTokens: config.get<number>('defaultMaxTokens', 32768),
       defaultMaxOutputTokens: config.get<number>('defaultMaxOutputTokens', 4096),

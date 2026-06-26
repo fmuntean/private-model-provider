@@ -247,7 +247,7 @@ export async function switchServer(
     // Switch to new preset
     await config.update('serverUrl', url, target);
     // Ensure provider uses latest configuration immediately
-    provider.applyLatestConfiguration();
+    await provider.applyLatestConfiguration();
 
     statusBar.setStatus(ServerStatus.Unknown, { serverUrl: url });
     provider.clearModelCache();
@@ -339,7 +339,7 @@ export async function switchServer(
 
     await config.update('serverUrl', selected.detail, target);
     // Ensure provider uses latest configuration immediately
-    provider.applyLatestConfiguration();
+    await provider.applyLatestConfiguration();
 
     // Verify the change
     const newUrl = vscode.workspace
