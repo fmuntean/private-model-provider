@@ -1,36 +1,47 @@
 # Chat Interface
 
 ## Overview
-This extension replaces the built‑in GitHub Copilot chat with a full‑featured ChatGPT‑style interface. Users can open the **Private Model Chat** command, type prompts, and receive responses from a configurable LLM endpoint.
 
-## Getting Started
-1. Open the command palette (`Ctrl+Shift+P`).
-2. Run **Private Model Chat: Open**.
-3. Type a message in the input box and press **Enter** or click **Send**.
-4. The response appears in the chat pane. Token usage is shown in the status bar.
+The extension provides a dedicated **Private Model** sidebar webview for chatting with a configured OpenAI-compatible server. It does not replace GitHub Copilot Chat; it is a separate private chat UI alongside the VS Code language model provider integration.
 
-## Features
-- **Master Prompt** – edit the system prompt that is prepended to every request.
-- **Context Management** – clear, export, or import conversation history.
-- **Token Tracking** – per‑session and cumulative token counts.
-- **Settings** – configure endpoint, model, temperature, max tokens, and API key.
-- **Dark/Light Theme** – UI respects VS Code theme.
-- **Error Handling** – friendly messages for network or authentication errors.
+## Opening the Chat
+
+1. Open the **Private Model** activity container in the VS Code activity bar.
+2. Select the **LMP** webview.
+3. Pick a model from the dropdown when models are available.
+4. Type a message and press **Enter** or click **Send**.
+5. Use **Shift+Enter** to insert a newline.
+
+## Current Features
+
+- **Session list**: the webview opens on the session list and can switch into a chat session.
+- **Streaming responses**: assistant output is appended as chunks arrive.
+- **Reasoning display**: streamed reasoning/thinking fields are rendered separately when the server emits them.
+- **Token usage display**: final server `usage` is shown after a streamed response when available.
+- **Model selector**: models are fetched from the provider and shown in the webview dropdown.
+- **Master prompt**: editable with the registered `private-model-provider.editMasterPrompt` command and saved to `.llm/master.md`.
+- **Session titles**: generated from the first user message with `smallModel` or the active/default model.
 
 ## Controls
-| Control | Description |
-|---------|-------------|
-| **Send** | Submit the current user message. |
-| **Clear Chat** | Remove all messages and reset context. |
-| **Export** | Save the current conversation to a JSON file. |
-| **Import** | Load a previously exported conversation. |
-| **System Prompt** | Edit the master prompt that guides the assistant. |
-| **Token Stats** | View tokens used for the current session in the status bar. |
+
+| Control | Behavior |
+|---|---|
+| **Send** | Sends the current message. |
+| **Stop** | Posts a stop request to the extension. Full cancellation handling is still limited in the current webview path. |
+| **Model dropdown** | Selects the model ID used for subsequent messages in the current UI session. |
+| **Back arrow** | Returns from a chat session to the session list. |
+| **Session item** | Switches the webview to that saved session. |
+
+The current webview does not implement separate Clear, Export, or Import buttons.
+
+## Session Storage
+
+- Metadata is written to `ai-logs/sessions.json`.
+- Message history is written to `ai-logs/YYYY-MM-DD/HHMM-<sessionId>.jsonl`.
+- If no workspace is open, the extension uses VS Code global storage.
 
 ## FAQ
-- **Where are my API keys stored?**  They are saved securely using VS Code's `SecretStorage` API.
-- **Can I use a Private Model (e.g., Ollama)?**  Yes – set the `localModelProvider.endpoint` to your local server URL.
-- **How is token usage calculated?**  The LLM provider returns a `usage` object (prompt/completion/total tokens) which is aggregated by the extension.
 
----
-*For more technical details, see the other docs in this folder.*
+- **Where are API keys stored?** They are stored in VS Code SecretStorage under `private.model.provider.apiKey`.
+- **Which server URL setting is used?** Use `private.model.provider.serverUrl`, for example `http://localhost:8000`.
+- **How is token usage calculated?** Server-returned `usage` is preferred. Token budgeting uses an approximate character-based estimate when preparing requests.

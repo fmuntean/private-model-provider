@@ -1,125 +1,106 @@
-# Extensibility – Plugin Architecture (NFR‑016)
+# Extensibility and Plugin Architecture
 
-## Overview
-The extension currently provides a solid core for interacting with OpenAI‑compatible inference servers, but the **Extensibility – Plugin Architecture** requirement is only *partial*.  To achieve full extensibility we need:
+## Current State
 
-1. **Public plugin interfaces** that third‑party extensions can implement.
-2. A **dependency‑injection (DI) container** so the core can be wired with custom implementations.
-3. **Plugin discovery & registration** via a VS Code contribution point.
-4. **Hook points** in the client/provider for request/response interception and tool registration.
-5. **Configuration schema** to enable/disable plugins and pass plugin‑specific options.
-6. Updated **documentation** and **tests**.
+The current implementation does **not** include a public plugin architecture, dependency-injection container, plugin contribution point, or plugin manager.
 
-The following sections describe an implementation plan and include architecture diagrams (Mermaid) that can be rendered directly in the docs.
+Implemented extensibility today is limited to:
 
----
+- VS Code language model provider integration through vendor ID `private-model-provider`.
+- OpenAI-compatible inference servers configured by `private.model.provider.serverUrl`.
+- Built-in tool schemas from `src/tools.ts`.
+- Lightweight MCP server configuration through `private.model.provider.mcpServers`.
+- User-selected MCP tool names through `private.model.provider.enabledMcpTools`.
+- Prompt customization through `.llm/master.md`, `.llm/session.summary.md`, and `.llm/prompts/<model-id>/`.
 
-## Implementation Plan
+## MCP Integration Scope
 
-| Phase | Tasks | Expected Outcome |
-|-------|-------|------------------|
-| **1 – Define Interfaces** | • Create `src/types/plugin.ts` with interfaces: `LanguageModelProviderPlugin`, `GatewayClientPlugin`, `ToolProviderPlugin`, `RequestInterceptor`, `ResponseInterceptor`. <br>• Export these from a new `src/plugin.ts` barrel file. | Public contracts for plugins. |
-| **2 – Introduce DI Container** | • Add a lightweight container (e.g., `inversify` or a hand‑rolled map). <br>• Refactor `GatewayProvider` and `GatewayClient` constructors to accept abstractions (`IGatewayClient`, `ISecretManager`, etc.). <br>• Register core implementations as default bindings. | Core becomes configurable without code changes. |
-| **3 – Plugin Manager** | • Add `src/pluginManager.ts` that scans `vscode.extensions.all` for the contribution point `localModelProvider.plugins`. <br>• Load each plugin module and call a known `register(container: Container)` function. <br>• Store loaded plugins for later disposal. | Automatic discovery and registration of external plugins. |
-| **4 – Hook Points** | • Extend `GatewayClient` with arrays of `requestInterceptors` and `responseInterceptors`. <br>• Invoke them in `fetchWithRetry` and `streamChatCompletion`. <br>• Add a `ToolRegistry` service that plugins can extend. | Plugins can modify HTTP calls, stream handling, and add new tools. |
-| **5 – Configuration Schema** | • Update `package.json` contributes.configuration to include a `plugins` object. <br>• Add per‑plugin enable/disable flags and an optional `options` object. | Users can control which plugins are active. |
-| **6 – Documentation & Tests** | • Write a **Plugin Architecture** section in `docs/ARCHITECTURE.md` (this file). <br>• Add a sample dummy plugin under `samples/plugin-demo/`. <br>• Unit‑test the container, plugin loading, and a mock interceptor. | Clear guidance for contributors and regression safety. |
-| **7 – Release** | • Bump version, update changelog, run `npm run esbuild` and publish. | New version with full extensibility support. |
+`src/mcp.ts` currently:
 
----
+1. Reads configured MCP server process definitions.
+2. Starts/stops those processes.
+3. Maps each configured server name to a simple OpenAI-style function schema.
 
-## Architecture Diagrams
+It does not yet:
 
-### 1. High‑Level Extensibility Architecture
+- Perform full MCP protocol initialization.
+- Query server-provided tools dynamically.
+- Execute MCP tool calls through the MCP protocol.
+- Provide a third-party extension contribution point.
+
+## Future Plugin Architecture
+
+The following design remains a proposed plan, not shipped behavior.
+
+### Goals
+
+1. Public plugin interfaces for third-party extensions.
+2. A small service registry or DI container.
+3. VS Code contribution point for plugin discovery.
+4. Request/response interceptors around `LlmClient`.
+5. Tool registration hooks.
+6. Per-plugin configuration.
+7. Tests and sample plugins.
+
+### Proposed Components
+
 ```mermaid
-graph TD
-    A[Extension Activation] --> B[DI Container]
-    B --> C[Core Services]
-    C --> D[GatewayProvider]
-    C --> E[GatewayClient]
-    B --> F[PluginManager]
-    F --> G[Discovered Plugins]
-    G --> H[Register Bindings]
-    H --> B
-    D --> I[ToolRegistry]
-    I --> J[Built‑in Tools]
-    I --> K[Plugin‑provided Tools]
-    E --> L[Request Interceptors]
-    E --> M[Response Interceptors]
-    L --> N[Plugin Interceptors]
-    M --> N
+flowchart TD
+    EXT[Extension Activation] --> CONTAINER[Service Container]
+    EXT --> PM[PluginManager]
+    PM --> VS[vscode.extensions.all]
+    VS --> PLUGINS[Discovered plugin extensions]
+    PLUGINS --> REGISTER[register container]
+    REGISTER --> CONTAINER
+    CONTAINER --> PROVIDER[GatewayProvider]
+    CONTAINER --> CLIENT[LlmClient]
+    CONTAINER --> TOOLS[ToolRegistry]
+    CLIENT --> REQ[Request Interceptors]
+    CLIENT --> RES[Response Interceptors]
 ```
 
-### 2. Plugin Discovery Flow
-```mermaid
-sequenceDiagram
-    participant VS as VS Code
-    participant Ext as Extension
-    participant PM as PluginManager
-    participant PL as Plugin
-    VS->>Ext: activate()
-    Ext->>PM: loadPlugins()
-    PM->>VS: query extensions with contribution point
-    VS-->>PM: list of extensions
-    loop for each extension
-        PM->>PL: require(module)
-        PL->>PM: register(container)
-    end
-    PM->>Ext: bindings ready
-```
+### Proposed Contribution Point
 
-### 3. DI Container & Service Resolution
-```mermaid
-classDiagram
-    class Container {
-        +register(identifier, implementation)
-        +resolve(identifier)
-    }
-    class GatewayProvider {
-        -client: IGatewayClient
-        -secretMgr: ISecretManager
-        -statsMgr?: IStatisticsManager
-    }
-    class GatewayClient {
-        -http: IHttpTransport
-        -requestInterceptors: RequestInterceptor[]
-        -responseInterceptors: ResponseInterceptor[]
-    }
-    Container --> GatewayProvider : resolves
-    Container --> GatewayClient : resolves
-    Container --> IHttpTransport : default HttpTransport
-    Container --> RequestInterceptor : array (plugins can add)
-    Container --> ResponseInterceptor : array (plugins can add)
-```
-
----
-
-## How to Create a Plugin
-1. **Add a contribution** in your extension’s `package.json`:
 ```json
-"contributes": {
-  "localModelProvider": {
-    "plugins": [
-      "my-plugin/dist/index.js"
-    ]
+{
+  "contributes": {
+    "privateModelProvider": {
+      "plugins": [
+        "dist/index.js"
+      ]
+    }
   }
 }
 ```
-2. **Export a `register` function**:
+
+The old proposed name `localModelProvider.plugins` should not be used for new work because the settings and command namespace are now `private.model.provider.*` and `private-model-provider.*`.
+
+### Proposed Plugin Shape
+
 ```ts
-import { Container } from 'inversify';
-export function register(container: Container) {
-  container.bind<IToolProvider>('ToolProvider').to(MyToolProvider).inSingletonScope();
-  container.bind<RequestInterceptor>('RequestInterceptor').to(MyInterceptor);
+export interface PrivateModelProviderPlugin {
+  id: string;
+  activate(context: PluginContext): Promise<void> | void;
+  deactivate?(): Promise<void> | void;
+}
+
+export interface PluginContext {
+  tools: ToolRegistry;
+  requestInterceptors: RequestInterceptorRegistry;
+  responseInterceptors: ResponseInterceptorRegistry;
+  configuration: unknown;
 }
 ```
-3. **Publish** the extension. The host extension will automatically load it on activation.
 
----
+## Implementation Checklist
 
-## Next Steps for the Core Team
-- Choose a DI library (or keep the simple map implementation). <br>- Draft the `src/types/plugin.ts` file. <br>- Implement `PluginManager` and add the contribution point to `package.json`. <br>- Write the sample plugin under `samples/`. <br>- Update CI to run the new unit tests.
+- Add public interfaces under `src/types/plugin.ts`.
+- Add a `src/plugin.ts` barrel export.
+- Add a `PluginManager` that discovers contribution points.
+- Add a registry for request interceptors, response interceptors, and tool providers.
+- Refactor provider/client constructors only where it reduces coupling; avoid a broad DI rewrite unless tests justify it.
+- Add package contribution schema and user settings for plugin enable/disable state.
+- Add a sample plugin under `samples/`.
+- Add tests for discovery, activation failure isolation, and interceptor ordering.
 
----
-
-*This document lives in `docs/PLUGIN_ARCHITECTURE.md` and is referenced from the main `ARCHITECTURE.md` file.*
+Until those items exist in code, documentation should refer to plugins as planned work only.

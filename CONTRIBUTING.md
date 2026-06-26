@@ -1,191 +1,223 @@
 # Contributing to Private Model Provider
 
-Thank you for your interest in contributing to Private Model Provider! This document provides guidelines and instructions for contributing.
+Thanks for helping improve Private Model Provider. This project is a VS Code extension that connects GitHub Copilot Chat, the built-in Private LLM chat view, and related tooling to local or self-hosted OpenAI-compatible inference servers.
+
+## Project at a Glance
+
+Private Model Provider currently supports:
+
+- VS Code language model provider registration through `vscode.lm.registerLanguageModelChatProvider`.
+- OpenAI-compatible `/v1/models` and `/v1/chat/completions` requests.
+- Streaming chat responses, reasoning fields, usage accounting, retries, and tool calls.
+- MCP tool discovery and selection.
+- A VS Code sidebar chat webview with session management.
+- Server presets, status bar health checks, secure API key storage, and usage statistics.
 
 ## Development Setup
 
 ### Prerequisites
 
-- Node.js 18.x or later
-- npm 9.x or later
-- VS Code 1.106.0 or later
-- Git
+- Node.js 18 or later.
+- npm 9 or later.
+- VS Code 1.100.0 or later.
+- Git.
+- An OpenAI-compatible inference server for manual testing, such as vLLM, LM Studio, Ollama, llama.cpp, LocalAI, or TGI.
 
-### Getting Started
+### Install and Build
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/fmuntean/private-model-provider.git
-   cd private-model-provider
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Build the extension**
-   ```bash
-   npm run esbuild
-   ```
-
-4. **Run in development mode**
-   - Press `F5` in VS Code to launch the Extension Development Host
-   - Or run `npm run esbuild-watch` for continuous builds
-
-5. **Package the extension (VSIX)**
-    ```bash
-    npm run package
-    ```
-    This runs `vsce package --no-yarn` (vsce is a dev‑dependency). It creates a `.vsix` file (e.g., `private-model-provider-1.1.3.vsix`) in the project root. You can install it locally via **Extensions → Install from VSIX...** or publish it to the Marketplace with `npm run deploy`.
-### Project Structure
-
+```bash
+npm install
+npm run esbuild
 ```
+
+For continuous rebuilds while working:
+
+```bash
+npm run esbuild-watch
+```
+
+To type-check without bundling:
+
+```bash
+npm run test-compile
+```
+
+To package a local VSIX:
+
+```bash
+npm run package
+```
+
+`npm run package` runs `vsce package --no-yarn`. The `prepackage` script also bumps the patch version with `npm version patch --no-git-tag-version`, so check `package.json` and `package-lock.json` before committing after packaging.
+
+## Running the Extension
+
+1. Open this repository in VS Code.
+2. Run `npm install` if dependencies are not already installed.
+3. Press `F5` to launch an Extension Development Host.
+4. Configure `private.model.provider.serverUrl`, for example `http://localhost:8000`.
+5. If your server requires authentication, run `Private Model Provider: Set API Key (Secure)`.
+6. Test from the Private Model sidebar, GitHub Copilot Chat model picker, and the command palette.
+
+## Project Structure
+
+```text
 private-model-provider/
 ├── src/
-│   ├── extension.ts    # Extension entry point
-│   ├── provider.ts     # Language model provider implementation
-│   ├── client.ts       # HTTP client for inference servers
-│   ├── types.ts        # TypeScript type definitions
-│   ├── secrets.ts      # Secure storage management
-│   ├── statusBar.ts    # Status bar UI manager
-│   └── statistics.ts   # Usage statistics tracking
-├── docs/               # Documentation
-│   └── API.md          # API documentation
-├── assets/             # Icons and screenshots
-├── package.json        # Extension manifest
-├── tsconfig.json       # TypeScript configuration
-└── CONTRIBUTING.md     # This file
+│   ├── extension.ts          # Extension activation, provider registration, commands, views
+│   ├── provider.ts           # VS Code language model provider implementation
+│   ├── commands.ts           # Command palette handlers and quick-pick flows
+│   ├── config.ts             # Extension configuration loading
+│   ├── mcp.ts                # MCP server and tool integration
+│   ├── prompts.ts            # Prompt template management
+│   ├── secretManager.ts      # VS Code SecretStorage API key handling
+│   ├── sessionManager.ts     # Chat session persistence and metadata
+│   ├── statistics.ts         # Usage and token statistics
+│   ├── statusBar.ts          # Status bar health and actions
+│   ├── core/
+│   │   ├── llmClient.ts      # OpenAI-compatible HTTP client and streaming parser
+│   │   ├── interfaces.ts     # Core interfaces
+│   │   └── BaseLogger.ts     # Shared logger base
+│   └── ui/
+│       ├── chatView.ts       # Chat webview provider
+│       ├── sessionView.ts    # Session view provider
+│       └── assets/           # Webview HTML, CSS, and browser JavaScript
+├── PromptTemplates/          # Built-in prompt templates
+├── docs/                     # Architecture, configuration, and feature docs
+├── Requirements/             # Requirements and traceability docs
+├── assets/                   # Extension icon and screenshots
+├── package.json              # VS Code manifest and npm scripts
+└── tsconfig.json             # TypeScript compiler configuration
 ```
 
-## Code Guidelines
+## Main Areas of Responsibility
 
-### TypeScript Style
+- `src/core/llmClient.ts`: keep OpenAI-compatible request and streaming behavior tolerant of server differences. Changes here should be tested against at least one real server.
+- `src/provider.ts`: preserve VS Code language model provider contracts, model metadata, tool handling, and cancellation behavior.
+- `src/ui/assets/`: keep webview changes compatible with VS Code webview restrictions. Avoid external browser dependencies unless they are intentionally bundled.
+- `src/mcp.ts` and `src/tools.ts`: verify tool schemas, enabled tool filtering, and model-facing tool-call formatting.
+- `src/sessionManager.ts` and `ai-logs/`: avoid committing generated chat logs unless they are deliberately used as fixtures or examples.
 
-- Use strict TypeScript mode
-- Prefer `const` over `let` when possible
-- Use explicit type annotations for function parameters and return types
-- Follow the existing code style (enforced by ESLint)
+## Coding Guidelines
 
-### Error Handling
+- Use TypeScript and follow the style already present in `src/`.
+- Prefer explicit types for public methods and exported functions.
+- Use `const` when a binding is not reassigned.
+- Use `GatewayError` from `src/core/llmClient.ts` for LLM gateway failures that should carry user-facing context.
+- Log through the existing logger utilities instead of adding new logging systems.
+- Keep API keys and tokens out of logs, screenshots, fixtures, and generated output.
+- Store credentials only through VS Code `SecretStorage` via `SecretManager`.
+- Keep changes focused. Avoid broad refactors when fixing a narrow provider, UI, or configuration issue.
 
-- Always use the `GatewayError` class for custom errors
-- Log errors with appropriate levels (`debug`, `info`, `warn`, `error`)
-- Provide user-friendly error messages via VS Code notifications
+## Documentation Guidelines
 
-### Security
+Update docs when behavior changes:
 
-- Never log sensitive information (API keys, tokens)
-- Use `SecretStorage` for storing credentials
-- Validate all external input
+- `README.md` for user-facing capabilities, commands, settings, screenshots, or troubleshooting.
+- `docs/CONFIGURATION.md` for settings under `private.model.provider.*`.
+- `docs/API.md` for internal API or provider behavior.
+- `docs/ARCHITECTURE.md` for meaningful component or data-flow changes.
+- `docs/PrivateLLM-Provider.md`, `docs/PrivateLLM-Chat.md`, or `docs/PrivateLLM-CLI.md` for mode-specific changes.
+- `CHANGELOG.md` for notable user-facing changes.
 
-### Documentation
+If you add or rename settings, update both `package.json` contribution metadata and the relevant docs.
 
-- Add JSDoc comments to all public methods
-- Update README.md for user-facing changes
-- Include inline comments for complex logic
-- Add screenshots to assets/ folder for new UI features
-- Update docs/API.md when changing internal APIs
+## Validation
 
-## Testing
+Run the most targeted checks that cover your change:
 
-### Manual Testing
-
-1. Start an inference server (e.g., vLLM, Ollama)
-2. Launch the extension in debug mode (`F5`)
-3. Open Copilot Chat and select a model from Private Model Provider
-4. Test various scenarios:
-   - Basic chat completion
-   - Tool calling
-   - Error handling (stop the server, invalid config)
-
-### Test Checklist
-
-- [ ] Extension activates without errors
-- [ ] Models are fetched from inference server
-- [ ] Chat completions stream correctly
-- [ ] Tool calls work with compatible models
-- [ ] Configuration changes apply without restart
-- [ ] API key is stored securely
-- [ ] Error messages are user-friendly
-- [ ] Status bar menu displays correct server status
-- [ ] Server preset configuration works correctly
-- [ ] All commands in feature menu execute properly
-
-## Submitting Changes
-
-### Pull Request Process
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run linting: `npm run lint` (if configured)
-5. Test your changes thoroughly
-6. Commit with descriptive messages
-7. Push to your fork
-8. Open a Pull Request
-
-### Commit Message Format
-
-```
-type(scope): description
-
-[optional body]
-
-[optional footer]
+```bash
+npm run test-compile
+npm run esbuild
 ```
 
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+There is currently no dedicated automated test suite or `npm run lint` script in `package.json`. If you add one, document it here and make sure it works in a clean checkout.
 
-Examples:
-- `feat(provider): add support for vision models`
-- `fix(client): handle timeout errors gracefully`
-- `docs(readme): update configuration section`
+For packaging-related changes, also run:
 
-### Pull Request Guidelines
+```bash
+npm run package
+```
 
-- Keep PRs focused and reasonably sized
-- Include a clear description of changes
-- Reference related issues
-- Update documentation as needed
-- Respond to review feedback promptly
+Remember that packaging increments the patch version through `prepackage`.
+
+## Manual Test Checklist
+
+Use this checklist for changes that affect runtime behavior:
+
+- [ ] Extension activates cleanly in the Extension Development Host.
+- [ ] Status bar shows the expected server state.
+- [ ] `Private Model Provider: Test Connection` returns a useful success or error message.
+- [ ] Model list loads from `/v1/models`.
+- [ ] Default model selection persists.
+- [ ] Chat streams responses in the Private Model sidebar.
+- [ ] GitHub Copilot Chat can select and use a Private Model Provider model.
+- [ ] Tool calling works when `enableToolCalling` is enabled.
+- [ ] Parallel tool calls can be disabled for servers that do not support them.
+- [ ] MCP tools can be discovered, selected, and sent only when enabled.
+- [ ] API keys are stored with SecretStorage and are not logged.
+- [ ] Server presets switch the configured endpoint correctly.
+- [ ] Session creation, switching, deletion, and title generation behave as expected.
+- [ ] Usage statistics update after requests.
+- [ ] Error messages are helpful when the server is stopped, misconfigured, or times out.
+
+## Inference Server Notes
+
+When testing server compatibility:
+
+- Do not include `/v1` in `private.model.provider.serverUrl`; the client appends OpenAI-compatible paths.
+- LM Studio commonly uses `http://localhost:1234`.
+- vLLM commonly uses `http://localhost:8000`.
+- If a server fails during tool calls, test with `private.model.provider.parallelToolCalling` disabled, then with `private.model.provider.enableToolCalling` disabled.
+- For reasoning models, verify that streamed reasoning fields do not break normal content streaming.
+
+## Pull Requests
+
+1. Create a focused branch.
+2. Keep generated files out of the PR unless they are intentionally part of the release.
+3. Update docs and screenshots when user-facing behavior changes.
+4. Run the relevant validation commands.
+5. Include manual test notes in the PR description.
+
+Useful commit types:
+
+- `feat`: new user-facing behavior.
+- `fix`: bug fix.
+- `docs`: documentation-only change.
+- `refactor`: internal restructuring without behavior changes.
+- `chore`: build, package, or maintenance change.
+
+Example commits:
+
+```text
+feat(provider): add model metadata for LM Studio
+fix(client): tolerate final usage chunks in SSE streams
+docs(config): document MCP tool settings
+```
 
 ## Reporting Issues
 
-### Bug Reports
+For bug reports, include:
 
-Please include:
-- VS Code version
-- Extension version
-- Inference server type and version
-- Model being used
-- Steps to reproduce
-- Expected vs actual behavior
-- Relevant logs from Output panel
+- VS Code version.
+- Extension version.
+- Operating system.
+- Inference server and version.
+- Model name.
+- Relevant `private.model.provider.*` settings, excluding secrets.
+- Steps to reproduce.
+- Expected and actual behavior.
+- Relevant output from the `Private LLM` output channel with secrets removed.
 
-### Feature Requests
+For feature requests, describe the workflow you want to support, the server or model involved, and any compatibility constraints.
 
-Please describe:
-- The problem you're trying to solve
-- Your proposed solution
-- Alternative solutions considered
-- Any additional context
+## Security and Privacy
 
-## Code of Conduct
-
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help others learn and grow
-- Follow Microsoft's Code of Conduct
+- Never commit API keys, bearer tokens, private endpoints, or sensitive prompts.
+- Scrub `ai-logs/` content before sharing logs or reproduction files.
+- Keep requests limited to the configured server URL.
+- Treat workspace code and chat history as private user data.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
-## Questions?
-
-- Open an issue for questions
-- Check existing issues before creating new ones
-- Join discussions in the Discussions tab
-
-Thank you for contributing! 🎉
+By contributing, you agree that your contributions are licensed under the MIT License.

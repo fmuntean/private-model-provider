@@ -1,27 +1,37 @@
-## Open router:
+# Model Compatibility Notes
 
-Tescent: Hy3 preview (free)
-    - I like this one 
-    - uses TODOs
-    - seems to build a lot of good code and calls tools correctly
-    - is very good for coding in typescript
-    - seems that has no request limits 
+Private Model Provider works best with models and servers that implement the OpenAI Chat Completions API.
 
-OpenAI: gpt-oss-120b (free):
-    - runns over the 50 requests limit 
-    - good for planning
-    - has issues responding sometimes
+## Required Server Endpoints
 
+| Endpoint | Required For |
+|---|---|
+| `GET /v1/models` | Model discovery in VS Code and the sidebar dropdown. |
+| `POST /v1/chat/completions` | Chat completions, streaming, usage tracking, and tool calling. |
 
- baidu/cobuddy:free: (NOT GOOD)
-    - seems to have issues with generating powershell/shell code.
-    - has a 15 requests limit
-    - did not generate any code
+LM Studio is also probed at `/api/v1/models` for richer metadata when available.
 
-Qwen3 Coder 480B A35B (free):
-    - seems that has throthling from time to time
-    - seems slower than the gpt-oss and HY3
-    - returns invalid context ??
+## Recommended Capabilities
 
-Poolside: Laguna M.1 (free):
-    - limited to 50 cals
+- Server-sent events (SSE) streaming.
+- Final `usage` chunks with `prompt_tokens`, `completion_tokens`, and `total_tokens`.
+- OpenAI-style `tools` / `tool_calls` for tool-capable workflows.
+- Reasoning fields such as `reasoning_content`, `reasoning`, or `thinking` if you want reasoning blocks shown in the sidebar.
+
+## Server Notes
+
+| Server | Notes |
+|---|---|
+| vLLM | Recommended for production-like self-hosting. Enable the appropriate tool-call parser for tool-capable models. |
+| LM Studio | Use `http://localhost:1234` without `/v1`. Disable `parallelToolCalling` if the server rejects `parallel_tool_calls`. |
+| Ollama | Use the OpenAI-compatible API surface. Tool support depends on model/server support. |
+| llama.cpp | Works when launched with an OpenAI-compatible server mode. |
+| LocalAI / TGI | Expected to work when exposing compatible model and chat completion endpoints. |
+
+## Model Selection Guidance
+
+- Use a larger coding model for normal chat and provider requests.
+- Use `private.model.provider.smallModel` for faster session title generation.
+- If tool calls are malformed, set `agentTemperature` to `0`, disable `parallelToolCalling`, or disable `enableToolCalling`.
+- If responses truncate too early, increase `defaultMaxTokens` and/or `defaultMaxOutputTokens` to match your model's real context window.
+- If the server rejects sampling fields, keep `topP`, `frequencyPenalty`, and `presencePenalty` at defaults.

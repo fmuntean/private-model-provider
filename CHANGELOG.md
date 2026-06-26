@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.3
+
+### New Features
+- Added richer Private LLM chat behavior, including session management, session title handling, prompt placeholder support, and a dedicated VS Code sidebar webview.
+- Added visible reasoning/thinking blocks in the chat view for models that stream reasoning fields.
+- Added token generation speed calculation and display for streamed responses.
+- Added MCP tool selection support so enabled tools can be controlled before sending tool definitions to the model.
+- Added server connection testing and improved model refresh behavior from the command palette and status flows.
+
+### Improvements
+- Renamed the extension and documentation from Local Model Provider to Private Model Provider.
+- Refactored extension command registration out of `extension.ts` into `commands.ts` for clearer activation logic.
+- Moved shared logging and LLM client functionality into `src/core/` and updated callers to use the core `LlmClient`.
+- Improved model information retrieval, including better handling for richer server metadata.
+- Updated dependencies and package metadata for the current VS Code extension layout.
+- Updated the extension icon and packaged asset set.
+
+### Fixes
+- Fixed model dropdown refresh and test connection cache handling.
+- Fixed chat textarea behavior so Enter sends and Shift+Enter inserts a newline.
+- Made chat session titles sticky in the chat view.
+- Fixed VSIX packaging by bundling from `out/`, including webview assets, and adding patch auto-increment during package generation.
+
 ## 1.1.2
 
 ### Improvements
