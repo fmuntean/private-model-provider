@@ -13,7 +13,7 @@ import { BaseLogger, LogLevel } from './core/BaseLogger';
  *
  * TODO: Replace VS Code specific APIs with injected abstractions for CLI usage.
  */
-export class Logger extends BaseLogger implements vscode.Disposable, ILogger {
+export class Logger extends BaseLogger implements ILogger,vscode.Disposable, ILogger {
   private outputChannel: IOutputChannel;
   private configProvider: IConfigProvider;
   // Separate static instance for the VS Code logger to avoid conflict with
@@ -118,6 +118,6 @@ export class Logger extends BaseLogger implements vscode.Disposable, ILogger {
 /**
  * Convenience function to get the logger instance
  */
-export function getLogger(): Logger {
+export function getLogger(): ILogger {
   return Logger.getInstance();
 }

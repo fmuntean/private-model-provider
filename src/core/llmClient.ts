@@ -103,7 +103,18 @@ interface ParsedChunk {
 }
 
 /**
- * HTTP client for OpenAI-compatible inference servers
+ * HTTP client for OpenAI-compatible inference servers.
+ * 
+ * The LlmClient class provides the core networking and request handling for all
+ * provider implementations in this extension. It handles:
+ * - HTTP requests to /v1/chat/completions, /v1/models, and LM Studio's /api/v1/models endpoints
+ * - Retry logic with exponential backoff and jitter for transient failures
+ * - SSE streaming of chat completions with tool call tracking and usage parsing
+ * - Error handling with GatewayError for network-level failures
+ * 
+ * The client is configured via GatewayConfig (server URL, API key, timeouts) and
+ * retry configuration (max retries, base delay, max delay). It provides a clean
+ * interface that can be reused by CopilotProvider, ChatProvider, or any future CLI implementation.
  */
 export class LlmClient {
   private config: GatewayConfig;
@@ -118,6 +129,15 @@ export class LlmClient {
   public updateConfig(config: GatewayConfig): void {
     this.config = config;
   }
+
+  public MaxRetries(): number {
+    return this.retryConfig.maxRetries;
+  }
+
+  public RetryDelayMs(): number {
+    return this.retryConfig.baseDelayMs;
+  }
+
 
   /** Calculate exponential backoff delay with jitter */
   private calculateBackoffDelay(attempt: number): number {
@@ -167,6 +187,8 @@ export class LlmClient {
             console.log(`[LLM Gateway] ${operation} failed with status ${response.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${this.retryConfig.maxRetries})`);
             await this.sleep(delay);
             continue;
+          } else {
+          throw new GatewayError(`${operation} failed with status ${response.status}: ${response.statusText}`,response.status, this.isRetryableError(null, response.status));
           }
         }
 
@@ -517,7 +539,7 @@ export class LlmClient {
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
-        headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
+        headers: this.getHeaders(),
         body: JSON.stringify({ ...request, stream: true, stream_options: { include_usage: true } }),
       }, 'Chat completion');
 
@@ -654,6 +676,7 @@ export class LlmClient {
       headers['x-api-key'] = raw;
     }
 
+    headers['Content-Type'] = 'application/json';
     headers['Accept'] = 'application/json';
     return headers;
   }
@@ -681,7 +704,7 @@ export class LlmClient {
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
-        headers: { ...this.getHeaders(), 'Content-Type': 'application/json' },
+        headers: this.getHeaders(),
         body: JSON.stringify({ ...request, stream: false }),
       }, 'Complete chat');
 
