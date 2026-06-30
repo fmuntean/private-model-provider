@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { getLogger, Logger } from './vscodeLogger';
+import { getLogger } from './vscodeLogger';
+import { ILogger } from './core/interfaces';
 
 /**
  * Secret key constants
@@ -10,12 +11,24 @@ const API_KEY_SECRET = 'private.model.provider.apiKey';
  * Manages secure storage for sensitive configuration like API keys
  */
 export class SecretManager {
+  private static instance: SecretManager | null = null;
   private readonly secretStorage: vscode.SecretStorage;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(context: vscode.ExtensionContext) {
-    this.secretStorage = context.secrets;
+  constructor(context?: vscode.ExtensionContext) {
+    this.secretStorage = context?.secrets ?? (vscode.workspace as any).secrets;
     this.logger = getLogger();
+  }
+
+  /**
+   * Singleton instance getter — creates the first instance and caches it
+   */
+  static getInstance(): SecretManager {
+    if (!SecretManager.instance) {
+      const context = vscode.workspace.getConfiguration('private.model.provider').get<vscode.ExtensionContext>('context');
+      SecretManager.instance = new SecretManager(context);
+    }
+    return SecretManager.instance;
   }
 
   /**
