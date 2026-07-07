@@ -1,13 +1,20 @@
+import * as http from 'http';
+import * as https from 'https';
+
+
 import { randomBytes } from 'node:crypto';
+
 import {
   OpenAIChatCompletionRequest,
   OpenAIChatCompletionResponse,
   OpenAIModelsResponse,
-  GatewayConfig,
 } from '../types';
+import { IllmClient, StreamChunk, StreamingToolCall, IllmClientConfig } from './interfaces';
+import { SecretManager } from '../secretManager';
 
 /**
- * Retry configuration for failed requests
+ * Retry configuration for failed requests. Kept as a separate interface so it
+ * can be overridden per-instance without coupling to the client config.
  */
 interface RetryConfig {
   maxRetries: number;
@@ -42,15 +49,6 @@ export class GatewayError extends Error {
 }
 
 /**
- * Accumulated tool call during streaming
- */
-interface StreamingToolCall {
-  id: string;
-  name: string;
-  arguments: string;
-}
-
-/**
  * State for tracking tool calls during streaming
  */
 interface ToolCallState {
@@ -59,8 +57,6 @@ interface ToolCallState {
   requestId: string;
   toolCallCounter: number;
   lastUsage?: ParsedChunk['usage'];
-
-  // Add error handling for SSE events
   handleSSEError(error: Error): void;
 }
 
@@ -112,21 +108,21 @@ interface ParsedChunk {
  * - SSE streaming of chat completions with tool call tracking and usage parsing
  * - Error handling with GatewayError for network-level failures
  * 
- * The client is configured via GatewayConfig (server URL, API key, timeouts) and
+ * The client is configured via {@link IllmClientConfig} (server URL, API key, timeouts) and
  * retry configuration (max retries, base delay, max delay). It provides a clean
  * interface that can be reused by CopilotProvider, ChatProvider, or any future CLI implementation.
  */
-export class LlmClient {
-  private config: GatewayConfig;
+export class LlmClient implements IllmClient {
+  protected config: IllmClientConfig;
   private retryConfig: RetryConfig;
 
-  constructor(config: GatewayConfig, retryConfig?: Partial<RetryConfig>) {
+  constructor(config: IllmClientConfig, retryConfig?: Partial<RetryConfig>) {
     this.config = config;
     this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...retryConfig };
   }
 
   /** Update client configuration */
-  public updateConfig(config: GatewayConfig): void {
+  public updateConfig(config: IllmClientConfig): void {
     this.config = config;
   }
 
@@ -147,7 +143,7 @@ export class LlmClient {
   }
 
   /** Check if an error is retryable */
-  private isRetryableError(error: unknown, statusCode?: number): boolean {
+  protected isRetryableError(error: unknown, statusCode?: number): boolean {
     if (statusCode && this.retryConfig.retryableStatusCodes.includes(statusCode)) {
       return true;
     }
@@ -170,7 +166,7 @@ export class LlmClient {
   }
 
   /** Fetch with retry logic */
-  private async fetchWithRetry(
+  protected async fetchWithRetry(
     url: string,
     options: RequestInit,
     operation: string
@@ -224,10 +220,11 @@ export class LlmClient {
   public async fetchModels(): Promise<OpenAIModelsResponse> {
     const url = `${this.config.serverUrl}/v1/models`;
 
+    const apiKey = await SecretManager.getClientApiKey();
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'GET',
-        headers: this.getHeaders(),
+        headers: this.getHeaders(apiKey),
       }, 'Fetch models');
 
       if (!response.ok) {
@@ -265,10 +262,12 @@ export class LlmClient {
   public async fetchLMStudioModels(): Promise<any> {
     // LM Studio uses a slightly different base path for its REST API.
     const url = `${this.config.serverUrl}/api/v1/models`;
+
+    const apiKey = await SecretManager.getClientApiKey();
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'GET',
-        headers: this.getHeaders(),
+        headers: this.getHeaders(apiKey),
       }, 'Fetch LM Studio models');
 
       if (!response.ok) {
@@ -466,7 +465,7 @@ export class LlmClient {
   private processSSELine(
     line: string,
     state: ToolCallState
-  ): { content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: ParsedChunk['usage'] } | null {
+  ): StreamChunk | null {
     const trimmed = line.trim();
 
     if (trimmed === '' || trimmed === 'data: [DONE]') {
@@ -481,7 +480,7 @@ export class LlmClient {
     const parsed = this.parseSSEData(data);
     if (!parsed) { return null; }
 
-    let result: { content: string; reasoning_content?: string; tool_calls: StreamingToolCall[]; finished_tool_calls: StreamingToolCall[]; usage?: ParsedChunk['usage'] };
+    let result: StreamChunk;
 
     if (parsed.delta) {
       const { content, reasoning_content: rc, finishedToolCalls } = this.processDeltaFormat(parsed, state);
@@ -522,24 +521,15 @@ export class LlmClient {
   public async *streamChatCompletion(
     request: OpenAIChatCompletionRequest,
     abortSignal?: AbortSignal
-  ): AsyncGenerator<
-    {
-      content: string;
-      reasoning_content?: string;
-      tool_calls: StreamingToolCall[];
-      finished_tool_calls: StreamingToolCall[];
-      usage?: ParsedChunk['usage'];
-    },
-    void,
-    unknown
-  > {
+  ): AsyncGenerator<StreamChunk, void, unknown> {
     const url = `${this.config.serverUrl}/v1/chat/completions`;
     const state = this.createToolCallState();
 
+    const apiKey = await SecretManager.getClientApiKey();
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: this.getHeaders(apiKey),
         body: JSON.stringify({ ...request, stream: true, stream_options: { include_usage: true } }),
       }, 'Chat completion');
 
@@ -666,11 +656,11 @@ export class LlmClient {
   }
 
   /** Get headers for API requests */
-  private getHeaders(): Record<string, string> {
+  protected getHeaders(apiKey: string | undefined): Record<string, string> {
     const headers: Record<string, string> = {};
 
-    if (this.config.apiKey) {
-      const raw = String(this.config.apiKey).trim();
+    if (apiKey) {
+      const raw = String(apiKey).trim();
       const bearer = raw.toLowerCase().startsWith('bearer ') ? raw : `Bearer ${raw}`;
       headers['Authorization'] = bearer;
       headers['x-api-key'] = raw;
@@ -681,15 +671,24 @@ export class LlmClient {
     return headers;
   }
 
+
+private httpAgent = new http.Agent({ keepAlive: true, timeout: 6000000 });
+private httpsAgent = new https.Agent({ keepAlive: true, timeout: 6000000 });
+
   /** Fetch wrapper with timeout support */
   private async fetch(url: string, options: RequestInit): Promise<Response> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.config.requestTimeout);
 
+    // Determine if target is HTTP or HTTPS
+    const isHttps = url.startsWith('https');
+
     try {
       const response = await fetch(url, {
         ...options,
         signal: controller.signal,
+        // @ts-ignore - Pass raw node agents to bypass VS Code's defaults
+        agent: isHttps ? this.httpsAgent : this.httpAgent
       });
       return response;
     } finally {
@@ -701,10 +700,11 @@ export class LlmClient {
   public async completeChat(request: OpenAIChatCompletionRequest): Promise<OpenAIChatCompletionResponse> {
     const url = `${this.config.serverUrl}/v1/chat/completions`;
 
+    const apiKey = await SecretManager.getClientApiKey();
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: this.getHeaders(apiKey),
         body: JSON.stringify({ ...request, stream: false }),
       }, 'Complete chat');
 

@@ -3,13 +3,14 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { LlmClient } from './core/llmClient';
-import { getLogger, Logger } from './vscodeLogger';
+import { getLogger } from './vscodeLogger';
+import { ILogger } from './core/interfaces';
 
 /**
  * Model-specific prompt file paths and management
  */
 export class PromptManager {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   /**
    * Construct a PromptManager.

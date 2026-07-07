@@ -63,3 +63,95 @@ export interface ILogger {
   /** Dispose any resources */
   dispose(): void;
 }
+
+// ---------------------------------------------------------------------------
+// LLM Client configuration (shared by LlmClient and GeminiClient)
+// ---------------------------------------------------------------------------
+
+import {
+  OpenAIChatCompletionRequest,
+  OpenAIChatCompletionResponse,
+  OpenAIModelsResponse,
+} from '../types';
+
+/**
+ * Configuration for an LLM client. Contains only the fields actually consumed
+ * by {@link LlmClient} and {@link GeminiClient}: server URL, API key, and
+ * request timeout. All other settings (temperature, retry policy, etc.) are
+ * either per-request or handled internally by each client with their own defaults.
+ */
+export interface IllmClientConfig {
+  /** Base URL of the inference server (e.g. `http://localhost:8000`) */
+  serverUrl: string;
+  /** API key for authentication, if required */
+  apiKey?: string;
+  /** Timeout in milliseconds for HTTP requests */
+  requestTimeout: number;
+}
+
+/**
+ * A single tool call accumulated during streaming.
+ */
+export interface StreamingToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/**
+ * The shape of each chunk yielded by streamChatCompletion.
+ */
+export interface StreamChunk {
+  content: string;
+  reasoning_content?: string;
+  tool_calls: StreamingToolCall[];
+  finished_tool_calls: StreamingToolCall[];
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+/**
+ * Common interface for LLM API clients.
+ *
+ * Both LlmClient (OpenAI-compatible servers) and GeminiClient (Google Gemini
+ * Interactions API) implement this interface, allowing the rest of the
+ * extension to swap between them transparently.
+ */
+export interface IllmClient {
+  /** Update client configuration at runtime. */
+  updateConfig(config: IllmClientConfig): void;
+
+  /** Maximum number of retries for failed requests. */
+  MaxRetries(): number;
+
+  /** Base delay in milliseconds between retry attempts. */
+  RetryDelayMs(): number;
+
+  /** Fetch available models from the provider. */
+  fetchModels(): Promise<OpenAIModelsResponse>;
+
+  /**
+   * Fetch models from LM Studio's /api/v1/models endpoint.
+   * Returns an empty response for providers that don't support this.
+   */
+  fetchLMStudioModels(): Promise<any>;
+
+  /**
+   * Send a non‑streaming chat completion request.
+   */
+  completeChat(request: OpenAIChatCompletionRequest): Promise<OpenAIChatCompletionResponse>;
+
+  /**
+   * Stream chat completions via SSE.
+   *
+   * @param request - The chat completion request.
+   * @param abortSignal - Optional signal to cancel the stream.
+   */
+  streamChatCompletion(
+    request: OpenAIChatCompletionRequest,
+    abortSignal?: AbortSignal
+  ): AsyncGenerator<StreamChunk, void, unknown>;
+}

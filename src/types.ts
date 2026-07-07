@@ -126,7 +126,19 @@ export interface OpenAIChatCompletionRequest {
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  stop_sequences?: string[];
+  tools?: OpenAITool[];
 }
+
+export interface OpenAITool {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+}
+
 
 export interface OpenAIChatCompletionChunk {
   id: string;
@@ -197,7 +209,7 @@ export interface OpenAIChatCompletionResponse {
     };
     finish_reason: string;
   }>;
-  usage: {
+  usage?: {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
@@ -281,15 +293,14 @@ export interface SessionManagerEvent {
 }
 
 export interface GatewayConfig {
-  serverUrl: string;
-  apiKey?: string;
-  requestTimeout: number;
+  // Fields below are no longer consumed by LlmClient or GeminiClient.
+  // They remain on this interface for backward compatibility with callers that
+  // still reference GatewayConfig directly (e.g. provider.ts loadConfig).
   defaultMaxTokens: number;
   defaultMaxOutputTokens: number;
   enableToolCalling: boolean;
   parallelToolCalling: boolean;
   agentTemperature: number;
-  // New extended options
   topP: number;
   frequencyPenalty: number;
   presencePenalty: number;

@@ -1,16 +1,18 @@
 import * as vscode from 'vscode';
 import { GatewayConfig, OpenAIChatCompletionRequest, ChatMessageType, ChatSession, MessageChunk, ModelInfo } from './types';
+import { IllmClientConfig } from './core/interfaces';
 import { MCPManager } from './mcp';
 import { SecretManager } from './secretManager';
 import { StatisticsManager } from './statistics';
 import { SessionManager } from './sessionManager';
-import { getLogger, Logger } from './vscodeLogger';
+import { Logger } from './vscodeLogger';
 // Added for logging chat history
 import * as fs from 'fs';
 import * as path from 'path';
 import { runCopilotTool,runInTerminalLocal } from './tools';
 import { LlmClient } from './core/llmClient';
 import { IOutputChannel } from './core/interfaces';
+import { getClientConfig, getGatewayConfig } from './config';
 
 /**
  * Language model provider for OpenAI-compatible inference servers
@@ -30,6 +32,14 @@ import { IOutputChannel } from './core/interfaces';
  * The provider handles configuration, secret management, model caching,
  * tool calling, and streaming of responses from the underlying inference
  * server (via {@link LlmClient}).
+ * 
+ * @deprecated This class has been refactored into a three-layer architecture:
+ * - {@link BaseProvider} - VSCode-independent utilities
+ * - {@link CopilotProvider} - VSCode Copilot Chat API integration
+ * - {@link ChatProvider} - Full extension functionality (recommended)
+ * 
+ * Use {@link ChatProvider} from `./core/ChatProvider` instead.
+ * This class is kept for backward compatibility and will be removed in a future version.
  */
 export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: LlmClient;
@@ -96,12 +106,16 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     statsManager?: StatisticsManager,
     sessionManager?: SessionManager
   ) {
-    this.logger = getLogger();
-    this.secretManager = new SecretManager(context);
+    this.logger = Logger.getInstance();
+    // Use singleton SecretManager (must be initialized in extension.ts first)
+    this.secretManager = SecretManager.getInstance();
     this.statsManager = statsManager ?? null;
     this.sessionManager = sessionManager ?? new SessionManager(context);
     this.config = this.loadConfig();
-    this.client = new LlmClient(this.config, {
+    
+    // Create IllmClientConfig by merging GatewayConfig with server URL and API key
+    const clientConfig = this.createClientConfig();
+    this.client = new LlmClient(clientConfig, {
       maxRetries: this.config.maxRetries,
       baseDelayMs: this.config.retryDelayMs,
     });
@@ -145,6 +159,28 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           }
         })
     );
+  }
+
+  /**
+   * Create IllmClientConfig by merging GatewayConfig with server URL and API key
+   */
+  private createClientConfig(): IllmClientConfig {
+    const cfg = vscode.workspace.getConfiguration('private.model.provider');
+    let serverUrlRaw = cfg.get<string>('serverUrl', 'http://localhost:8000');
+    // Remove trailing /v1 if present
+    if (/\/v1\/?$/.test(serverUrlRaw)) {
+      serverUrlRaw = serverUrlRaw.replace(/\/v1\/?$/, '');
+    }
+    // Remove any trailing slash
+    if (/\/$/.test(serverUrlRaw)) {
+      serverUrlRaw = serverUrlRaw.replace(/\/+$/, '');
+    }
+    
+    return {
+      serverUrl: serverUrlRaw,
+      apiKey: '', // Will be set asynchronously in initializeApiKey
+      requestTimeout: cfg.get<number>('requestTimeout', 60000),
+    };
   }
 
   /**
@@ -199,10 +235,11 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private async initializeApiKey(): Promise<void> {
     try {
-      const apiKey = await this.secretManager.getApiKey();
+      const apiKey = await SecretManager.getClientApiKey();
       if (apiKey) {
-        this.config.apiKey = apiKey;
-        this.client.updateConfig(this.config);
+        const clientConfig = this.createClientConfig();
+        clientConfig.apiKey = apiKey;
+        this.client.updateConfig(clientConfig);
         this.logger.info('API key loaded from secure storage');
       }
     } catch (error) {
@@ -215,9 +252,10 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   public async refreshApiKey(): Promise<void> {
     try {
-      const apiKey = await this.secretManager.getApiKey();
-      this.config.apiKey = apiKey || '';
-      this.client.updateConfig(this.config);
+      const apiKey = await SecretManager.getClientApiKey();
+      const clientConfig = this.createClientConfig();
+      clientConfig.apiKey = apiKey || '';
+      this.client.updateConfig(clientConfig);
       this.logger.info(apiKey ? 'API key updated from secure storage' : 'API key cleared');
       // Clear model cache so next call revalidates with new credentials
       this.cachedModels = null;
@@ -654,6 +692,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     this.logger.info(`Streaming chat completion...`);
     let totalContent = '';
     let totalToolCalls = 0;
+    let streamAborted = false; // Flag to abort streaming on tool error
 
     // Variable to hold final usage object from client stream
     let usage: any = undefined;
@@ -826,7 +865,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     } catch {
       // Ignore init errors here; downstream will surface issues
     }
-    this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
+    //this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
     // Check cache first
     const now = Date.now();
     if (this.cachedModels && this.config.modelCacheTtlMs > 0 &&
@@ -1156,7 +1195,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     } catch {
       // Continue; errors will be handled by request path
     }
-    this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
+    //this.logger.debug(`API key configured: ${this.config.apiKey ? 'yes' : 'no'}`);
 
     // Get or create active session
     let session = this.sessionManager.getActiveSession();
@@ -1480,25 +1519,9 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private loadConfig(): GatewayConfig {
     const config = vscode.workspace.getConfiguration('private.model.provider');
-    const previousApiKey = this.config?.apiKey ?? '';
-
-    // Normalize server URL (remove trailing slash and optional /v1 segment)
-    let serverUrlRaw = config.get<string>('serverUrl', 'http://localhost:8000');
-    // Remove trailing /v1 if present
-    if (/\/v1\/?$/.test(serverUrlRaw)) {
-      serverUrlRaw = serverUrlRaw.replace(/\/v1\/?$/, '');
-      this.logger.info('NOTE: Stripped trailing /v1 from serverUrl setting to avoid duplicated path.');
-    }
-    // Remove any trailing slash
-    if (/\/$/.test(serverUrlRaw)) {
-      serverUrlRaw = serverUrlRaw.replace(/\/+$/, '');
-      this.logger.info('NOTE: Stripped trailing slash from serverUrl setting.');
-    }
+    
 
     const cfg: GatewayConfig = {
-      serverUrl: serverUrlRaw,
-      apiKey: previousApiKey,
-      requestTimeout: config.get<number>('requestTimeout', 60000),
       defaultMaxTokens: config.get<number>('defaultMaxTokens', 32768),
       defaultMaxOutputTokens: config.get<number>('defaultMaxOutputTokens', 4096),
       enableToolCalling: config.get<boolean>('enableToolCalling', true),
@@ -1513,21 +1536,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       modelCacheTtlMs: config.get<number>('modelCacheTtlMs', 300000),
       logLevel: config.get<'debug' | 'info' | 'warn' | 'error'>('logLevel', 'info'),
     };
-
-    // Validate requestTimeout
-    if (cfg.requestTimeout <= 0) {
-      this.logger.error(` requestTimeout must be > 0; using default 60000`);
-      cfg.requestTimeout = 60000;
-    }
-
-    // Validate serverUrl format
-    try {
-      new URL(cfg.serverUrl);
-    } catch {
-      this.logger.error(` Invalid server URL: ${cfg.serverUrl}`);
-      throw new Error(`Invalid server URL: ${cfg.serverUrl}`);
-    }
-
+    
     // Validate defaultMaxOutputTokens relative to defaultMaxTokens
     if (cfg.defaultMaxOutputTokens >= cfg.defaultMaxTokens) {
       const adjusted = Math.max(64, cfg.defaultMaxTokens - 256);
@@ -1548,7 +1557,8 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
    */
   private reloadConfig(): void {
     this.config = this.loadConfig();
-    this.client.updateConfig(this.config);
+    const clientConfig = this.createClientConfig();
+    this.client.updateConfig(clientConfig);
     this.logger.info('Configuration reloaded');
   }
 
@@ -1647,23 +1657,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     if (this.config.enableToolCalling) {
       // Import the definitions lazily to avoid circular deps at top of file
       const { getToolDefinitions } = require('./tools');
-      const allTools = getToolDefinitions();
-      // Apply user‑selected enable filter for MCP tools
-      const enabledMcpTools: string[] = vscode.workspace
-        .getConfiguration('private.model.provider')
-        .get<string[]>('enabledMcpTools', []);
-      // If the user has specified a whitelist, keep only those tools whose name matches.
-      if (enabledMcpTools.length > 0) {
-        requestOptions.tools = allTools.filter((t: any) => {
-          const name = t.function?.name ?? t.name;
-          // Core extension tools are always allowed; MCP tools are identified by being absent from the base list.
-          const coreToolNames = ['readFile', 'semanticSearch', 'askQuestions', 'applyPatch', 'runInTerminal'];
-          if (coreToolNames.includes(name)) return true;
-          return enabledMcpTools.includes(name);
-        });
-      } else {
-        requestOptions.tools = allTools;
-      }
+      requestOptions.tools = getToolDefinitions();
     }
 
     try {

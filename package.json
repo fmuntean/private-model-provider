@@ -2,7 +2,7 @@
   "name": "private-model-provider",
   "displayName": "MFD: Private Model Provider",
   "description": "VS Code extension to connect to private or local LLM inference servers (Ollama, llama.cpp, LocalAI, LM Studio, vLLM) via OpenAI API compatible endpoints.",
-  "version": "1.2.9",
+  "version": "1.2.12",
   "publisher": "mfd",
   "icon": "assets/private-model-provider.png",
   "private": true,
@@ -65,6 +65,11 @@
       {
         "vendor": "private-model-provider",
         "displayName": "Private Model Provider"
+      },
+      {
+        "vendor": "private-model-provider-gemini",
+        "displayName": "Private Model Provider (Gemini API Key)",
+        "apiKeyType": "gemini"
       }
     ],
     "commands": [
@@ -349,8 +354,26 @@
             "Log only warnings and errors",
             "Log only errors"
           ],
-          "description": "Logging verbosity level for the output channel.",
+          "description": "Log level for extension output.",
           "order": 18
+        },
+        "private.client.gemini.serverUrl": {
+          "type": "string",
+          "default": "https://generativelanguage.googleapis.com",
+          "description": "Google Gemini API endpoint (generativelanguage.googleapis.com).",
+          "order": 19
+        },
+        "private.client.gemini.modelId": {
+          "type": "string",
+          "default": "gemini-pro",
+          "description": "Default model ID for Gemini (e.g., gemini-pro, gemini-flash).",
+          "order": 20
+        },
+        "private.client.gemini.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google Gemini API Key (securely stored).",
+          "order": 21
         }
       },
       "private.model.provider.availableMcpTools": {

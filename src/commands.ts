@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GatewayProvider } from './provider';
+import { ChatProvider } from './ChatProvider';
 import { StatusBarManager, ServerStatus, ServerPreset } from './statusBar';
 import { getLogger } from './vscodeLogger';
 import { StatisticsManager } from './statistics';
@@ -7,11 +7,12 @@ import { ChatSideBarProvider } from './ui/chatView';
 import * as fs from 'fs';
 import { PromptManager } from './prompts';
 import { LlmClient } from './core/llmClient';
+import { SecretManager } from './secretManager';
 
 /**
  * Implements the "private-model-provider.selectMcpTools" command.
  */
-export async function selectMcpTools(provider: GatewayProvider): Promise<void> {
+export async function selectMcpTools(provider: ChatProvider): Promise<void> {
   // Access the MCP manager attached to the provider (may be undefined if MCP is not configured)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mcpMgr: any = (provider as any)['mcpManager'];
@@ -48,10 +49,20 @@ export async function selectMcpTools(provider: GatewayProvider): Promise<void> {
  * Implements the "private-model-provider.setApiKey" command.
  * Extracted from extension.ts to keep command registration separate.
  */
-export async function setApiKey(provider: GatewayProvider): Promise<void> {
-  const secretManager = provider.getSecretManager();
-  const hasExisting = await secretManager.hasApiKey();
-
+export async function setApiKey(): Promise<void> {
+  const secretManager = SecretManager.getInstance();
+  
+  const ApiKeyType = await vscode.window.showQuickPick(['Client API Key', 'Gemini API Key'], {
+    placeHolder: 'Select API key type',
+  });
+  
+  let hasExisting = false;
+  if (ApiKeyType=='Client API Key') {
+    hasExisting = await SecretManager.getClientApiKey().then((key) => !!key);
+  }else if (ApiKeyType=='Gemini API Key') {
+    hasExisting = await SecretManager.getGeminiApiKey().then((key) => !!key);
+  }
+  
   const placeholder = hasExisting
     ? 'Enter new API key (leave empty to remove current key)'
     : 'Enter your API key for the inference server';
@@ -68,17 +79,10 @@ export async function setApiKey(provider: GatewayProvider): Promise<void> {
   }
 
   try {
-    await secretManager.setApiKey(apiKey);
-    // Apply the updated key to the running client immediately
-    await provider.refreshApiKey();
-    if (apiKey) {
-      vscode.window.showInformationMessage(
-        'Private Model Provider: API key stored securely.'
-      );
-    } else {
-      vscode.window.showInformationMessage(
-        'Private Model Provider: API key removed.'
-      );
+    if (ApiKeyType=='Client API Key') {
+    await secretManager.setClientApiKey(apiKey);
+    } else if (ApiKeyType=='Gemini API Key') {
+      await secretManager.setGeminiApiKey(apiKey);
     }
   } catch (error) {
     vscode.window.showErrorMessage(
@@ -93,7 +97,7 @@ export async function setApiKey(provider: GatewayProvider): Promise<void> {
  * Extracted from extension.ts to keep command registration separate.
  */
 export async function selectModel(
-  provider: GatewayProvider,
+  provider: ChatProvider,
   statusBar: StatusBarManager
 ): Promise<void> {
   try {
@@ -148,7 +152,7 @@ export async function selectModel(
  * Extracted from extension.ts to keep command registration separate.
  */
 export async function switchServer(
-  provider: GatewayProvider,
+  provider: ChatProvider,
   statusBar: StatusBarManager
 ): Promise<void> {
   const logger = getLogger();
@@ -429,7 +433,7 @@ export async function showStats(statsManager: StatisticsManager): Promise<void> 
  * @param provider 
  * @param statusBar 
  */
-export async function refreshModels(chatViewProviderRef: { current: ChatSideBarProvider }, provider: GatewayProvider, statusBar: StatusBarManager): Promise<void>{
+export async function refreshModels(chatViewProviderRef: { current: ChatSideBarProvider }, provider: ChatProvider, statusBar: StatusBarManager): Promise<void>{
   vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -467,7 +471,7 @@ export async function refreshModels(chatViewProviderRef: { current: ChatSideBarP
  * 
  * @param provider 
  */
-export async function testConnection(provider: GatewayProvider): Promise<void> {
+export async function testConnection(provider: ChatProvider): Promise<void> {
   try {
     // Ensure we fetch fresh model information, bypassing any cached list
     provider.clearModelCache();
@@ -489,7 +493,7 @@ export async function testConnection(provider: GatewayProvider): Promise<void> {
  */
 export async function generateSystemPrompts(
   context: vscode.ExtensionContext,
-  provider: GatewayProvider,
+  provider: ChatProvider,
   chatViewProviderRef: { current: ChatSideBarProvider }
 ): Promise<void> {
   try {
@@ -591,7 +595,7 @@ export async function generateSystemPrompts(
 }
 
 
-export async function startMcpServers(provider: GatewayProvider): Promise<void> {
+export async function startMcpServers(provider: ChatProvider): Promise<void> {
   try {
     // Access the private mcpManager via bracket notation to avoid TS errors
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -608,7 +612,7 @@ export async function startMcpServers(provider: GatewayProvider): Promise<void> 
 }
 
 
-export async function stopMcpServers(provider:GatewayProvider): Promise<void> {
+export async function stopMcpServers(provider: ChatProvider): Promise<void> {
   try {
     const mcpMgr: any = (provider as any)['mcpManager'];
     if (mcpMgr && typeof mcpMgr.stopAll === 'function') {

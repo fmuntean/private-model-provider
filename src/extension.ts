@@ -1,20 +1,30 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import { GatewayProvider } from './provider';
-import { StatusBarManager, ServerStatus, ServerPreset } from './statusBar';
+import { ChatProvider } from './ChatProvider';
+import { StatusBarManager, ServerStatus } from './statusBar';
 import { StatisticsManager } from './statistics';
 import { SessionManager } from './sessionManager';
 import { registerSessionView } from './ui/sessionView';
 import { registerChatView } from './ui/chatView';
 import { getLogger, Logger } from './vscodeLogger';
-import { PromptManager } from './prompts';
 import { LlmClient } from './core/llmClient';
+import { MCPManager } from './mcp';
+import { SecretManager } from './secretManager';
 import * as command from './commands';
+import { CopilotProvider } from './CopilotProvider';
+import { GatewayConfig } from './types';
+import { GeminiClient } from './core/geminiClient';
+import { getClientConfig, getGeminiConfig } from './config';
+import { IllmClientConfig } from './core/interfaces';
+
+//---------------------------------------------------------------
+// https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider
+//---------------------------------------------------------------
+
 
 /**
  * Extension activation
  */
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Private LLM');
   const logger = Logger.getInstance('Private LLM', outputChannel);
   
@@ -39,16 +49,81 @@ export function activate(context: vscode.ExtensionContext) {
     statusBar.updateStats(stats);
   });
 
+  
+  
+  // Initialize SecretManager with extension context (must be done first)
+  const secretManager = SecretManager.initialize(context);
+
+  // Load configuration to create client
+  const config = vscode.workspace.getConfiguration('private.model.provider');
+
+  const gatewayConfig: GatewayConfig = {
+    defaultMaxTokens: config.get<number>('defaultMaxTokens', 32768),
+    defaultMaxOutputTokens: config.get<number>('defaultMaxOutputTokens', 4096),
+    enableToolCalling: config.get<boolean>('enableToolCalling', true),
+    parallelToolCalling: config.get<boolean>('parallelToolCalling', true),
+    agentTemperature: config.get<number>('agentTemperature', 0),
+    topP: config.get<number>('topP', 1.0),
+    frequencyPenalty: config.get<number>('frequencyPenalty', 0.0),
+    presencePenalty: config.get<number>('presencePenalty', 0.0),
+    maxRetries: config.get<number>('maxRetries', 3),
+    retryDelayMs: config.get<number>('retryDelayMs', 1000),
+    modelCacheTtlMs: config.get<number>('modelCacheTtlMs', 300000),
+    logLevel: config.get<'debug' | 'info' | 'warn' | 'error'>('logLevel', 'info'),
+  };
+
+  // Get LLM client config with secure API key
+  const llmConfig: IllmClientConfig = await getClientConfig(secretManager);
+
+  // Create LLM client
+  const llmClient = new LlmClient(llmConfig, {
+    maxRetries: gatewayConfig.maxRetries,
+    baseDelayMs: gatewayConfig.retryDelayMs,
+  });
+
+  // Create managers
+  const mcpManager = new MCPManager();
+
+
   // Create and register the language model provider
   // This is the provider that handles the communication with 
   // the inference server when called from other chat extensions 
   // like Github Copilot Chat
-  const provider = new GatewayProvider(context, statsManager, sessionManager);
-  const chatProvider = vscode.lm.registerLanguageModelChatProvider(
-    'private-model-provider',
-    provider
+  const provider1 = new CopilotProvider(
+    logger,
+    gatewayConfig,
+    llmClient
   );
-  context.subscriptions.push(chatProvider);
+  
+  const copilotProvider = vscode.lm.registerLanguageModelChatProvider(
+    'private-model-provider',
+    provider1
+  );
+  context.subscriptions.push(copilotProvider);
+
+  // Create and register the Gemini client and provider
+  const geminiClientConfig: IllmClientConfig = await getGeminiConfig(secretManager);
+  const geminiClient = new GeminiClient(geminiClientConfig);
+  const provider2 = new CopilotProvider(
+    logger,
+    gatewayConfig,
+    geminiClient
+  );
+  context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider(
+    'private-model-provider-gemini',
+    provider2
+  ));
+
+  // Create and register the chat provider for the sidebar
+  const provider = new ChatProvider(
+    context,
+    logger,
+    gatewayConfig,
+    llmClient,
+    mcpManager,
+    statsManager,
+    sessionManager
+  );
 
   // Register the chat sidebar webview
   const chatViewProvider = registerChatView(context, provider, sessionManager);
@@ -88,7 +163,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Register command to set API key securely
   const setApiKeyCommand = vscode.commands.registerCommand(
     'private-model-provider.setApiKey',
-    async () => command.setApiKey(provider)
+    async () => command.setApiKey()
   );
 
   // Register command to show status menu
@@ -214,7 +289,7 @@ export function deactivate() {
   // Health‑check: verify server connectivity on activation and when the
   // server URL changes. The check simply attempts to fetch the model list.
   // ---------------------------------------------------------------------
-  async function runHealthCheck(statusBar: StatusBarManager, provider: GatewayProvider) {
+  async function runHealthCheck(statusBar: StatusBarManager, provider: ChatProvider) {
     const config = vscode.workspace.getConfiguration('private.model.provider');
     const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
     statusBar.setStatus(ServerStatus.Unknown, { serverUrl });
