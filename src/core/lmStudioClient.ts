@@ -13,7 +13,7 @@
 import {
   OpenAIChatCompletionRequest,
   OpenAIChatCompletionResponse,
-  OpenAIModelsResponse,
+  AIModelsResponse,
 } from '../types';
 import { IllmClient, StreamChunk, StreamingToolCall, IllmClientConfig } from './interfaces';
 import { LlmClient } from './llmClient';
@@ -25,7 +25,7 @@ export class LMStudioClient extends LlmClient {
   }
 
   /** Fetch models via LM Studio's /api/v1/models endpoint. */
-  public async fetchModels(): Promise<OpenAIModelsResponse> {
+  public async fetchModels(): Promise<AIModelsResponse> {
     const url = `${this.config.serverUrl}/api/v1/models`;
     const apiKey = await SecretManager.getClientApiKey();
     try {

@@ -98,7 +98,7 @@ export interface ModelInfo extends OpenAIModel {
   detail?: string;
 }
 
-export interface OpenAIModelsResponse {
+export interface AIModelsResponse {
   object: string;
   data: OpenAIModel[];
 }

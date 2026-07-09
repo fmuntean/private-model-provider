@@ -5,12 +5,13 @@ import * as https from 'https';
 import { randomBytes } from 'node:crypto';
 
 import {
-  OpenAIChatCompletionRequest,
   OpenAIChatCompletionResponse,
-  OpenAIModelsResponse,
+  AIModelsResponse,
 } from '../types';
 import { IllmClient, StreamChunk, StreamingToolCall, IllmClientConfig } from './interfaces';
 import { SecretManager } from '../secretManager';
+import { OpenAIConverter, OpenAIRequest } from './OpenAIAPI';
+import { AIRequest, AIResponse } from './chatMessages';
 
 /**
  * Retry configuration for failed requests. Kept as a separate interface so it
@@ -115,6 +116,7 @@ interface ParsedChunk {
 export class LlmClient implements IllmClient {
   protected config: IllmClientConfig;
   private retryConfig: RetryConfig;
+  private converter = new OpenAIConverter();
 
   constructor(config: IllmClientConfig, retryConfig?: Partial<RetryConfig>) {
     this.config = config;
@@ -217,7 +219,7 @@ export class LlmClient implements IllmClient {
   }
 
   /** Fetch available models from /v1/models endpoint */
-  public async fetchModels(): Promise<OpenAIModelsResponse> {
+  public async fetchModels(): Promise<AIModelsResponse> {
     const url = `${this.config.serverUrl}/v1/models`;
 
     const apiKey = await SecretManager.getClientApiKey();
@@ -519,18 +521,20 @@ export class LlmClient implements IllmClient {
    * The optional abortSignal can be used to cancel the stream.
    */
   public async *streamChatCompletion(
-    request: OpenAIChatCompletionRequest,
+    request: AIRequest,
     abortSignal?: AbortSignal
   ): AsyncGenerator<StreamChunk, void, unknown> {
     const url = `${this.config.serverUrl}/v1/chat/completions`;
     const state = this.createToolCallState();
+
+    const openAIRequest = this.converter.toProviderRequest(request);
 
     const apiKey = await SecretManager.getClientApiKey();
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: this.getHeaders(apiKey),
-        body: JSON.stringify({ ...request, stream: true, stream_options: { include_usage: true } }),
+        body: JSON.stringify({ ...openAIRequest, stream: true, stream_options: { include_usage: true } }),
       }, 'Chat completion');
 
       if (!response.ok) {
@@ -697,15 +701,17 @@ private httpsAgent = new https.Agent({ keepAlive: true, timeout: 6000000 });
   }
 
   /** Send a non-streaming chat completion request and return the full response. */
-  public async completeChat(request: OpenAIChatCompletionRequest): Promise<OpenAIChatCompletionResponse> {
+  public async completeChat(request: AIRequest): Promise<AIResponse> {
     const url = `${this.config.serverUrl}/v1/chat/completions`;
+
+    const openAIRequest = this.converter.toProviderRequest(request);
 
     const apiKey = await SecretManager.getClientApiKey();
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: this.getHeaders(apiKey),
-        body: JSON.stringify({ ...request, stream: false }),
+        body: JSON.stringify({ ...openAIRequest, stream: false }),
       }, 'Complete chat');
 
       if (!response.ok) {
@@ -717,7 +723,10 @@ private httpsAgent = new https.Agent({ keepAlive: true, timeout: 6000000 });
         );
       }
 
-      return await response.json();
+      const ret = await response.json();
+      const aiResponse = this.converter.fromProviderResponse(ret);
+      
+      return aiResponse;
     } catch (error) {
       if (error instanceof GatewayError) {
         throw error;

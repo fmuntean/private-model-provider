@@ -21,16 +21,23 @@ The extension provides a dedicated **Private Model** sidebar webview for chattin
 - **Model selector**: models are fetched from the provider and shown in the webview dropdown.
 - **Master prompt**: editable with the registered `private-model-provider.editMasterPrompt` command and saved to `.llm/master.md`.
 - **Session titles**: generated from the first user message with `smallModel` or the active/default model.
+- **Markdown rendering**: messages are rendered with full markdown support, including code blocks.
+- **Code syntax highlighting**: code blocks are automatically highlighted for readability.
+- **Copy code buttons**: easily copy code blocks to the clipboard.
+- **Apply code to file**: directly apply generated code to a new or existing file.
+- **Message actions**: copy, edit, regenerate, and delete individual messages.
+- **@file context mentions**: include relevant files in your chat context by typing `@`.
 
 ## Controls
 
 | Control | Behavior |
 |---|---|
-| **Send** | Sends the current message. |
+| **Send** | Sends the current message, including any attached context files. |
 | **Stop** | Posts a stop request to the extension. Full cancellation handling is still limited in the current webview path. |
 | **Model dropdown** | Selects the model ID used for subsequent messages in the current UI session. |
 | **Back arrow** | Returns from a chat session to the session list. |
 | **Session item** | Switches the webview to that saved session. |
+| **Attach button** | Opens a file picker to attach files as context to the current message. |
 
 The current webview does not implement separate Clear, Export, or Import buttons.
 

@@ -233,8 +233,8 @@ export class BaseProvider {
    */
   private countChar(str: string, char: string): number {
     // Escape regex special characters in the search char
-    const escapePattern = /[.*+?^${}()|[\\\\]\\\\\\\\]/g;
-    const escapedChar = char.replaceAll(escapePattern, String.raw`\\\\$&`);
+    const escapePattern = /[.*+?^${}()|[\]\\]/g;
+    const escapedChar = char.replace(escapePattern, '\\$&');
     const regex = new RegExp(escapedChar, 'g');
     let count = 0;
     while (regex.exec(str) !== null) {

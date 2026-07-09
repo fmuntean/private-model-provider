@@ -8,6 +8,7 @@
  */
 
 import * as vscode from 'vscode';
+import { ToolDefinition } from './core/chatMessages';
 
 /**
  * Generic runner for a Copilot tool command.
@@ -137,7 +138,7 @@ export async function askQuestions(questions: any[]): Promise<any> {
  * If the LM API is unavailable or an error occurs, an empty array is returned
  * so the caller can safely fall back to the built‑in tools.
  */
-function getVsCodeToolDefinitions(): any[] {
+function getVsCodeToolDefinitions(): ToolDefinition[] {
     try {
         // The LM API is experimental and may not exist in older VS Code versions.
         // Guard against undefined to avoid runtime errors.
@@ -153,12 +154,7 @@ function getVsCodeToolDefinitions(): any[] {
                 rawTools = lm.tools.getToolDefinitions();
             }
 
-            // Convert each raw tool definition into the OpenAI function schema.
-            const converted = rawTools.map((tool) => ({
-                type: 'function',
-                function: tool,
-            }));
-            return converted;
+           return rawTools;
         }
     } catch (e) {
         console.warn('[tools] Failed to include vscode.lm.tools definitions:', e);
@@ -174,96 +170,84 @@ function getVsCodeToolDefinitions(): any[] {
  * Return the array of tool definitions compatible with the OpenAI function‑calling API.
  * This mirrors the previous implementation that lived in `llmClient.ts`.
  */
-export function getToolDefinitions(): any[] {
+export function getToolDefinitions(): ToolDefinition[] {
     // Base tool definitions used by the extension
-    const baseTools = [
+    const baseTools:ToolDefinition[] = [
         {
-            type: 'function',
-            function: {
-                name: 'readFile',
-                description: 'Read a portion of a file from the workspace.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        filePath: { type: 'string', description: 'Absolute path to the file.' },
-                        startLine: { type: 'integer', description: '1‑based start line.', default: 1 },
-                        endLine: { type: 'integer', description: '1‑based end line.', default: 1000 }
-                    },
-                    required: ['filePath']
-                }
+            name: 'readFile',
+            description: 'Read a portion of a file from the workspace.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Absolute path to the file.' },
+                    startLine: { type: 'integer', description: '1-based start line.', default: 1 },
+                    endLine: { type: 'integer', description: '1-based end line.', default: 1000 }
+                },
+                required: ['filePath']
             }
         },
         {
-            type: 'function',
-            function: {
-                name: 'askQuestions',
-                description: 'Ask the user a series of questions via the Copilot UI.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        questions: {
-                            type: 'array',
-                            description: 'List of question objects.',
-                            items: {
-                                type: 'object',
-                                properties: {
-                                    header: { type: 'string' },
-                                    question: { type: 'string' },
-                                    message: { type: 'string' },
-                                    allowFreeformInput: { type: 'boolean' },
-                                    multiSelect: { type: 'boolean' },
-                                    options: {
-                                        type: 'array',
-                                        items: {
-                                            type: 'object',
-                                            properties: {
-                                                label: { type: 'string' },
-                                                description: { type: 'string' },
-                                                recommended: { type: 'boolean' }
-                                            },
-                                            required: ['label']
-                                        }
+            name: 'askQuestions',
+            description: 'Ask the user a series of questions via the Copilot UI.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    questions: {
+                        type: 'array',
+                        description: 'List of question objects.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                header: { type: 'string' },
+                                question: { type: 'string' },
+                                message: { type: 'string' },
+                                allowFreeformInput: { type: 'boolean' },
+                                multiSelect: { type: 'boolean' },
+                                options: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            label: { type: 'string' },
+                                            description: { type: 'string' },
+                                            recommended: { type: 'boolean' }
+                                        },
+                                        required: ['label']
                                     }
-                                },
-                                required: ['header', 'question']
-                            }
+                                }
+                            },
+                            required: ['header', 'question']
                         }
-                    },
-                    required: ['questions']
-                }
+                    }
+                },
+                required: ['questions']
             }
         },
         {
-            type: 'function',
-            function: {
-                name: 'applyPatch',
-                description: 'Apply a diff/patch to a file in the workspace.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        explanation: { type: 'string', description: 'Why the patch is being applied.' },
-                        patch: { type: 'string', description: 'The V4A style patch string.' }
-                    },
-                    required: ['explanation', 'patch']
-                }
+            name: 'applyPatch',
+            description: 'Apply a diff/patch to a file in the workspace.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    explanation: { type: 'string', description: 'Why the patch is being applied.' },
+                    patch: { type: 'string', description: 'The V4A style patch string.' }
+                },
+                required: ['explanation', 'patch']
             }
         },
         {
-            type: 'function',
-            function: {
-                name: 'runInTerminal',
-                description: 'Execute a shell command in the integrated terminal.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        command: { type: 'string', description: 'Command line to run.' },
-                        explanation: { type: 'string', description: 'Human readable explanation shown to the user.' },
-                        goal: { type: 'string', description: 'Short goal description (e.g. "Install dependencies").' },
-                        mode: { type: 'string', enum: ['sync', 'async'], description: 'Execution mode.' },
-                        timeout: { type: 'integer', description: 'Optional timeout in ms (sync only).' }
-                    },
-                    required: ['command', 'explanation', 'goal']
-                }
+            name: 'runInTerminal',
+            description: 'Execute a shell command in the integrated terminal.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    command: { type: 'string', description: 'Command line to run.' },
+                    explanation: { type: 'string', description: 'Human readable explanation shown to the user.' },
+                    goal: { type: 'string', description: 'Short goal description (e.g. "Install dependencies").' },
+                    mode: { type: 'string', enum: ['sync', 'async'], description: 'Execution mode.' },
+                    timeout: { type: 'integer', description: 'Optional timeout in ms (sync only).' }
+                },
+                required: ['command', 'explanation', 'goal']
             }
         }
     ];
@@ -294,7 +278,7 @@ export function getToolDefinitions(): any[] {
  * supplied tool array. If the MCP manager cannot be loaded or provides no tools,
  * the original array is returned unchanged.
  */
-function getMcpToolDefinitions() {
+function getMcpToolDefinitions():ToolDefinition[] {
     try {
         // Dynamically require to avoid circular dependency issues.
         const { MCPManager } = require('./mcp');
@@ -305,6 +289,7 @@ function getMcpToolDefinitions() {
         // If MCP manager cannot be loaded, just log and continue with existing tools.
         console.warn('[tools] MCP manager not available or failed to load:', e);
     }
+    return [];
 }
 
 /** List code usages for a symbol. */

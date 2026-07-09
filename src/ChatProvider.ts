@@ -8,15 +8,27 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { CopilotProvider } from './CopilotProvider';
-import { GatewayConfig, ChatSession, MessageChunk, OpenAIChatCompletionRequest, ChatMessageType, ModelInfo } from './types';
-import { Logger, getLogger } from './vscodeLogger';
+import { GatewayConfig, ChatSession, MessageChunk } from './types';
+import { Logger } from './vscodeLogger';
 import { LlmClient } from './core/llmClient';
 import { MCPManager } from './mcp';
 import { SecretManager } from './secretManager';
 import { StatisticsManager } from './statistics';
 import { SessionManager } from './sessionManager';
 import { runCopilotTool, runInTerminalLocal } from './tools';
-import { IllmClientConfig, IOutputChannel } from './core/interfaces';
+import { IllmClientConfig } from './core/interfaces';
+import { 
+  Message, 
+  MessageRole, 
+  MessageContent, 
+  ToolCall, 
+  ToolDefinition, 
+  TokenUsage,
+  AIRequest,
+  AIResponse,
+  StreamChunk,
+  RequestOptions
+} from './core/chatMessages';
 
 /**
  * ChatProvider is the full-featured provider for the Private LLM extension.
@@ -113,9 +125,9 @@ export class ChatProvider extends CopilotProvider {
   /**
    * Send a simple message from the chat webview and return the response.
    */
-  public async sendMessage(text: string, modelId?: string, sessionId?: string): Promise<{ content: string; usage?: any }> {
+  public async sendMessage(text: string, modelId?: string, sessionId?: string, contextFiles?: string[]): Promise<{ content: string; usage?: TokenUsage }> {
     await this.initializationPromise;
-    this.logger.info(`sendMessage called with text: ${text.substring(0, 50)}..., modelId: ${modelId}, sessionId: ${sessionId}`);
+    this.logger.info(`sendMessage called with text: ${text.substring(0, 50)}..., modelId: ${modelId}, sessionId: ${sessionId}, contextFiles: ${contextFiles?.length || 0}`);
 
     // Use provided model or fall back to default
     const targetModelId = modelId ||
@@ -148,6 +160,20 @@ export class ChatProvider extends CopilotProvider {
     // Add user message to session
     this.sessionManager.addMessage('user', 'user', text);
 
+    // Add context files to session messages if provided
+    if (contextFiles && contextFiles.length > 0) {
+      for (const filePath of contextFiles) {
+        try {
+          const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+          const content = `File: ${filePath}\n\`\`\`\n${fileContent.toString()}\n\`\`\``;
+          this.sessionManager.addMessage('context', 'system', content);
+          this.logger.info(`Added file context: ${filePath}`);
+        } catch (error) {
+          this.logger.error(`Failed to read context file ${filePath}: ${error}`);
+        }
+      }
+    }
+
     // Generate session title if this is a new session
     if (isNewSession) {
       try {
@@ -157,28 +183,27 @@ export class ChatProvider extends CopilotProvider {
       }
     }
 
-    // Build the request with conversation history
-    const openAIMessages: Record<string, unknown>[] = [];
+    // Build the request with conversation history using unified Message type
+    const messages: Message[] = [];
     
     // Add conversation history from session
     for (const msg of session.messages) {
       if (msg.role === 'system' && msg.type === 'prompt') {
         // Skip if we already added the master prompt
-        if (openAIMessages.length === 0 || openAIMessages[0].role !== 'system') {
-          openAIMessages.push({ role: 'system', content: msg.content, messageType: 'prompt' });
+        if (messages.length === 0 || messages[0].role !== 'system') {
+          messages.push({ role: 'system' as MessageRole, content: msg.content });
         }
       } else {
-        openAIMessages.push({ 
-          role: msg.role, 
-          content: msg.content,
-          messageType: msg.type
+        messages.push({ 
+          role: msg.role as MessageRole, 
+          content: msg.content
         });
       }
     }
 
     const requestOptions: any = {
       model: targetModelId,
-      messages: openAIMessages,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
       max_tokens: this.config.defaultMaxOutputTokens || 2048,
       temperature: 0.7,
       stream: false,
@@ -222,8 +247,16 @@ export class ChatProvider extends CopilotProvider {
       this.logger.info(`Sending message to model: ${targetModelId} (Session: ${session.id})`);
       // Send the request directly to the inference server using the existing client.
       const response = await this.requestWithRetry(() => this.client.completeChat(requestOptions));
-      const content = response.choices?.[0]?.message?.content || '';
-      const usage = response.usage;
+      const content = (response as any).choices?.[0]?.message?.content || '';
+      
+      // Map OpenAI API response (snake_case) to TokenUsage interface (camelCase)
+      const rawUsage = (response as any).usage;
+      const usage: TokenUsage | undefined = rawUsage ? {
+        inputTokens: rawUsage.prompt_tokens,
+        outputTokens: rawUsage.completion_tokens,
+        totalTokens: rawUsage.total_tokens,
+        cachedTokens: rawUsage.cached_tokens
+      } : undefined;
 
       // Add agent response to session
       if (content) {
@@ -232,12 +265,12 @@ export class ChatProvider extends CopilotProvider {
 
       // Record usage statistics with token tracking by type
       if (usage && this.statsManager) {
-        await this.statsManager.recordChatUsage(usage, targetModelId);
+        await this.statsManager.recordChatUsage(usage as any, targetModelId);
         
         // Update session token usage by type
-        if (usage.prompt_tokens && usage.completion_tokens) {
-          const promptTokens = usage.prompt_tokens;
-          const completionTokens = usage.completion_tokens;
+        if (usage.inputTokens && usage.outputTokens) {
+          const promptTokens = usage.inputTokens;
+          const completionTokens = usage.outputTokens;
           
           // Add agent response tokens
           this.sessionManager.updateTokenUsage('agent', 0, completionTokens);
@@ -301,43 +334,29 @@ export class ChatProvider extends CopilotProvider {
       });
     }
 
-    // Build the request with conversation history
-    const openAIMessages: Record<string, unknown>[] = [];
+    // Build the request with conversation history using unified Message type
+    const messages: Message[] = [];
     
     // Add conversation history from session
     for (const msg of session.messages) {
       if (msg.role === 'system' && msg.type === 'prompt') {
-        if (openAIMessages.length === 0 || openAIMessages[0].role !== 'system') {
-          openAIMessages.push({ role: 'system', content: msg.content, messageType: 'prompt' });
+        if (messages.length === 0 || messages[0].role !== 'system') {
+          messages.push({ role: 'system' as MessageRole, content: msg.content });
         }
       } else {
-        openAIMessages.push({ 
-          role: msg.role, 
-          content: msg.content,
-          messageType: msg.type
+        messages.push({ 
+          role: msg.role as MessageRole, 
+          content: msg.content
         });
       }
     }
 
-    const requestOptions: any = {
+    
+    const requestOptions: RequestOptions = {
       model: targetModelId,
-      messages: openAIMessages,
-      max_tokens: this.config.defaultMaxOutputTokens || 2048,
-      temperature: this.config.agentTemperature || 0.1,
-      stream: true,
-      stream_options: { include_usage: true }
+      maxTokens: this.config.defaultMaxOutputTokens || 2048,
+      temperature: this.config.agentTemperature || 0.1
     };
-
-    // Add optional parameters if they differ from defaults
-    if (this.config.topP !== 1.0) {
-      requestOptions.top_p = this.config.topP;
-    }
-    if (this.config.frequencyPenalty !== 0) {
-      requestOptions.frequency_penalty = this.config.frequencyPenalty;
-    }
-    if (this.config.presencePenalty !== 0) {
-      requestOptions.presence_penalty = this.config.presencePenalty;
-    }
 
     // Add tooling if tool calling is enabled
     if (this.config.enableToolCalling) {
@@ -351,7 +370,7 @@ export class ChatProvider extends CopilotProvider {
       let fullContent = '';
       let wasCancelled = false;
       let doneSent = false;
-      let finalUsage: any = null;
+      let finalUsage: TokenUsage | null = null;
       
       const token = cancellationToken || { isCancellationRequested: false, onCancelled: () => {} } as any;
 
@@ -397,7 +416,11 @@ export class ChatProvider extends CopilotProvider {
       }
 
       const requestStartTime = Date.now();
-      for await (const chunk of this.client.streamChatCompletion(requestOptions, abortCtrl.signal)) {
+      const request:AIRequest = {
+        messages:messages,
+        options: requestOptions
+      }
+      for await (const chunk of this.client.streamChatCompletion(request, abortCtrl.signal)) {
         if (token.isCancellationRequested) {
           this.logger.info('Streaming cancelled by user (detected in loop)');
           wasCancelled = true;
@@ -417,30 +440,42 @@ export class ChatProvider extends CopilotProvider {
         // Forward tool calls if present
         if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
           for (const toolCall of chunk.finished_tool_calls) {
+            // Create a properly typed ToolCall
+            const typedToolCall: ToolCall = {
+              id: toolCall.id,
+              name: toolCall.name,
+              arguments: toolCall.arguments
+            };
+            
             // Store the progress reporter
-            (this as any).pendingToolCalls.set(toolCall.id, progressReporter);
+            (this as any).pendingToolCalls.set(typedToolCall.id, progressReporter);
             // Parse arguments and report the tool call part to the UI
             const parsedArgs = this.tryRepairJson(toolCall.arguments) as Record<string, unknown>;
-            parsedArgs.toolInvokationToken = toolCall.id;
+            parsedArgs.toolInvokationToken = typedToolCall.id;
             // Clean up
-            (this as any).pendingToolCalls.delete(toolCall.id);
+            (this as any).pendingToolCalls.delete(typedToolCall.id);
           }
         }
         
         // Check if usage is included in the chunk (final chunk)
         if (chunk.usage) {
-          finalUsage = chunk.usage;
+          // Map OpenAI API response (snake_case) to TokenUsage interface (camelCase)
+          finalUsage = {
+            inputTokens: chunk.usage.prompt_tokens,
+            outputTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens
+          };
           
-          // Calculate token speed
+          // Calculate token speed (handled separately from TokenUsage)
           const durationMs = Date.now() - requestStartTime;
           const completionTokens = chunk.usage.completion_tokens || 0;
+          let tokenSpeed: number | undefined;
           if (durationMs > 0 && completionTokens > 0) {
-            const tokensPerSecond = completionTokens / (durationMs / 1000);
-            finalUsage.tokenSpeed = tokensPerSecond;
-            finalUsage.durationMs = durationMs;
+            tokenSpeed = completionTokens / (durationMs / 1000);
           }
           
-          onChunk({ usage: chunk.usage, done: true });
+          // Send usage with performance metrics to UI
+          onChunk({ usage: { ...chunk.usage, tokenSpeed, durationMs }, done: true });
           doneSent = true;
         }
       }
@@ -464,12 +499,12 @@ export class ChatProvider extends CopilotProvider {
 
       // Record usage statistics
       if (finalUsage && this.statsManager) {
-        await this.statsManager.recordChatUsage(finalUsage, targetModelId);
+        await this.statsManager.recordChatUsage(finalUsage as any, targetModelId);
         
         // Update session token usage by type
-        if (finalUsage.prompt_tokens && finalUsage.completion_tokens) {
-          const promptTokens = finalUsage.prompt_tokens;
-          const completionTokens = finalUsage.completion_tokens;
+        if (finalUsage.inputTokens && finalUsage.outputTokens) {
+          const promptTokens = finalUsage.inputTokens;
+          const completionTokens = finalUsage.outputTokens;
           
           this.sessionManager.updateTokenUsage('agent', 0, completionTokens);
           this.sessionManager.updateTokenUsage('user', Math.floor(promptTokens * 0.6), 0);
@@ -552,7 +587,7 @@ export class ChatProvider extends CopilotProvider {
 
       try {
         const response = await this.client.completeChat(requestOptions);
-        let title = response.choices?.[0]?.message?.content || '';
+        let title = (response as any).choices?.[0]?.message?.content || '';
         title = title.replace(/^['"]|['"]$/g, '').trim();
         if (title.length > 50) {
           title = title.substring(0, 47) + '...';
@@ -729,18 +764,15 @@ export class ChatProvider extends CopilotProvider {
     options: vscode.ProvideLanguageModelChatResponseOptions
   ): void {
     // Combine built‑in tools (from the request) with any MCP tools configured by the user.
-    const toolSchemas: any[] = [];
+    const toolSchemas: ToolDefinition[] = [];
 
     // First, include any tools passed in via the request options (e.g., from the chat UI).
     if (options.tools && options.tools.length > 0) {
       toolSchemas.push(
-        ...options.tools.map((tool) => ({
-          type: 'function',
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.inputSchema,
-          },
+        ...options.tools.map((tool): ToolDefinition => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema || {},
         }))
       );
     }
@@ -759,7 +791,14 @@ export class ChatProvider extends CopilotProvider {
     }
 
     if (toolSchemas.length > 0) {
-      requestOptions.tools = toolSchemas;
+      requestOptions.tools = toolSchemas.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        }
+      }));
       if (options.toolMode !== undefined) {
         requestOptions.tool_choice =
           options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
@@ -784,6 +823,9 @@ export class ChatProvider extends CopilotProvider {
     let totalContent = '';
     let totalToolCalls = 0;
     let streamAborted = false; // Flag to abort streaming on tool error
+
+
+    
 
     // Variable to hold final usage object from client stream
     let usage: any = undefined;
@@ -828,37 +870,44 @@ export class ChatProvider extends CopilotProvider {
             args = {}; // Fallback to empty args
           }
 
+          // Create a properly typed ToolCall
+          const typedToolCall: ToolCall = {
+            id: toolCall.id,
+            name: toolCall.name,
+            arguments: args
+          };
+
           // Report the tool call to the UI so the user sees the pending call
           progress.report(new vscode.LanguageModelToolCallPart(
-            toolCall.id,
-            toolCall.name,
+            typedToolCall.id,
+            typedToolCall.name,
             args as object
           ));
 
           // Store a progress reporter for the eventual tool result (used elsewhere if needed)
-          this.pendingToolCalls.set(toolCall.id, progress);
+          this.pendingToolCalls.set(typedToolCall.id, progress);
 
           // Execute the tool and report the result back to the model
           (async () => {
             try {
-              const result = await this.executeTool(toolCall.name, args as Record<string, unknown>);
+              const result = await this.executeTool(typedToolCall.name, args as Record<string, unknown>);
               // Convert result to a plain object for the tool result part
               const resultObj = typeof result === 'object' && result !== null ? result : { value: result };
               // LanguageModelToolResultPart expects either a string or an array. Cast to any to satisfy overload.
               progress.report(new vscode.LanguageModelToolResultPart(
-                toolCall.id,
+                typedToolCall.id,
                 JSON.stringify(resultObj) as any
               ));
             } catch (e) {
-              this.logger.error(`Tool execution failed for ${toolCall.name}: ${e instanceof Error ? e.message : String(e)}`);
+              this.logger.error(`Tool execution failed for ${typedToolCall.name}: ${e instanceof Error ? e.message : String(e)}`);
               // Report an error result so the model can continue
               progress.report(new vscode.LanguageModelToolResultPart(
-                toolCall.id,
+                typedToolCall.id,
                 JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) as any
               ));
             } finally {
               // Clean up pending map
-              this.pendingToolCalls.delete(toolCall.id);
+              this.pendingToolCalls.delete(typedToolCall.id);
             }
           })();
         }

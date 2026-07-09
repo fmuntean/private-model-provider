@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { getLogger } from './vscodeLogger';
+import { ToolDefinition } from './core/chatMessages';
 
 /**
  * Configuration for a single MCP server.
@@ -93,7 +94,7 @@ export class MCPManager {
    *  this method to query the server (e.g., via HTTP) and transform the result
    *  into OpenAI‑compatible tool schemas.
    */
-  public getToolDefinitions(): any[] {
+  public getToolDefinitions(): ToolDefinition[] {
     // Build tool definitions from the configured MCP servers. Each server
     // configuration is treated as a tool that can be invoked via the model.
     // For now we expose a simple function with no parameters; real
@@ -102,12 +103,9 @@ export class MCPManager {
       return [];
     }
     return this.configs.map(cfg => ({
-      type: 'function',
-      function: {
-        name: cfg.name,
-        description: `MCP tool for server ${cfg.name}`,
-        parameters: { type: 'object', properties: {}, required: [] },
-      },
+      name: cfg.name,
+      description: `MCP tool for server ${cfg.name}`,
+      parameters: { type: 'object', properties: {}, required: [] },
     }));
   }
 }

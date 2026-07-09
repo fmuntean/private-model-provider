@@ -8,9 +8,11 @@
 
 import * as vscode from 'vscode';
 import { BaseProvider } from './core/BaseProvider';
-import { GatewayConfig, OpenAIChatCompletionRequest, ModelInfo } from './types';
+import { GatewayConfig, ModelInfo } from './types';
 import { IllmClient } from './core/interfaces';
 import { ILogger } from './core/interfaces';
+import { AIRequest, Message, MessageContent, RequestOptions, ToolCall, ToolDefinition, ToolPart } from './core/chatMessages';
+import { LanguageModelChatMessageRole } from 'vscode';
 
 /**
  * CopilotProvider implements the VS Code LanguageModelChatProvider interface.
@@ -163,98 +165,21 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
     this.logger.debug(`Message count: ${messages.length}`);
 
     // Convert messages to OpenAI format
-    const openAIMessages: Record<string, unknown>[] = [];
-    for (const msg of messages) {
-      const convertedMsgs = this.convertSingleMessageWithLogging(msg);
-      for (const converted of convertedMsgs) {
-        openAIMessages.push(converted);
-      }
-    }
-    this.logger.debug(`Converted to ${openAIMessages.length} OpenAI messages`);
+    let aiMessages = this.toAiMessages(messages);
 
-    // Calculate token limits
-    const modelMaxContext = this.config.defaultMaxTokens || 32768;
-    const desiredOutputTokens = Math.min(this.config.defaultMaxOutputTokens || 2048, Math.floor(modelMaxContext / 2));
-    const toolsTokenEstimate = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4 * 1.2) : 0;
-    const reservedForInput = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
+    this.logger.debug(`Converted to ${aiMessages.length} AI messages`);
 
-    // Build input text for an initial token estimate using ALL messages
-    const fullInputText = openAIMessages
-      .map((m) => {
-        let text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
-        if ((m as any).tool_calls) { text += JSON.stringify((m as any).tool_calls); }
-        return text;
-      })
-      .join('\n');
+    // Remove unnecessary messages if the total token estimate exceeds the model's max context length
+    var truncatedMessages = this.TruncateMessages(options, aiMessages);
 
-    const initialInputTokens = Math.ceil(fullInputText.length / 4);
-
-    // Only truncate when the combined estimate truly exceeds the available context
-    let truncatedMessages = openAIMessages;
-    if (initialInputTokens > reservedForInput) {
-      const maxInputTokens = reservedForInput;
-      truncatedMessages = this.truncateMessagesToFit(openAIMessages, maxInputTokens);
-      if (truncatedMessages.length < openAIMessages.length) {
-        this.logger.warn(`Truncated conversation from ${openAIMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
-      }
-    }
-
-    // Build input text for token estimation (final set used in request)
-    const inputText = truncatedMessages
-      .map((m) => {
-        let text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
-        if (m.tool_calls) { text += JSON.stringify(m.tool_calls); }
-        return text;
-      })
-      .join('\n');
-
-    const estimatedInputTokens = Math.ceil(inputText.length / 4);
-    const safeMaxOutputTokens = this.calculateSafeMaxOutputTokens(estimatedInputTokens, toolsTokenEstimate);
-
-    this.logger.debug(
-      `Token estimate: input=${estimatedInputTokens}, tools=${toolsTokenEstimate}, model_context=${modelMaxContext}, chosen_max_tokens=${safeMaxOutputTokens}`
-    );
+    // TODO: optimize tools definitions to avoid sending large schemas repeatedly
 
     // Build request
-    const hasTools = this.config.enableToolCalling && options.tools && options.tools.length > 0;
-    const temperature = hasTools ? (this.config.agentTemperature ?? 0) : 0.7;
-
-    const requestOptions: Record<string, unknown> = {
-      model: model.id,
-      messages: truncatedMessages,
-      max_tokens: safeMaxOutputTokens,
-      temperature,
-    };
-
-    // Only include sampling parameters when they differ from defaults
-    if (this.config.topP !== 1.0) {
-      requestOptions.top_p = this.config.topP;
-    }
-    if (this.config.frequencyPenalty !== 0) {
-      requestOptions.frequency_penalty = this.config.frequencyPenalty;
-    }
-    if (this.config.presencePenalty !== 0) {
-      requestOptions.presence_penalty = this.config.presencePenalty;
-    }
-
-    const toolsConfig = this.buildToolsConfig(options);
-    if (toolsConfig) {
-      requestOptions.tools = toolsConfig;
-      if (options.toolMode !== undefined) {
-        requestOptions.tool_choice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
-      }
-      if (this.config.parallelToolCalling) {
-        requestOptions.parallel_tool_calls = true;
-      }
-      this.logger.info(`Sending ${toolsConfig.length} tools to model (parallel: ${this.config.parallelToolCalling})`);
-    }
-
-    if (options.modelOptions) {
-      Object.assign(requestOptions, options.modelOptions);
-    }
+    const request = this.toAIRequest(model, truncatedMessages, options);
+    
 
     // Log request
-    const debugRequest = JSON.stringify(requestOptions, null, 2);
+    const debugRequest = JSON.stringify(request, null, 2);
     this.logger.debug(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
 
     try {
@@ -265,7 +190,7 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
       const abortCtrl = new AbortController();
       token.onCancellationRequested(() => abortCtrl.abort());
 
-      for await (const chunk of this.client.streamChatCompletion(requestOptions as unknown as OpenAIChatCompletionRequest, abortCtrl.signal)) {
+      for await (const chunk of this.client.streamChatCompletion(request, abortCtrl.signal)) {
         if (token.isCancellationRequested) {
           break;
         }
@@ -324,6 +249,52 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
     }
   }
 
+  private TruncateMessages(options: vscode.ProvideLanguageModelChatResponseOptions, aiMessages: Message[]) {
+    const modelMaxContext = this.config.defaultMaxTokens || 32768;
+    const desiredOutputTokens = Math.min(this.config.defaultMaxOutputTokens || 2048, Math.floor(modelMaxContext / 2));
+    const toolsTokenEstimate = options.tools ? Math.ceil(JSON.stringify(options.tools).length / 4 * 1.2) : 0;
+    const reservedForInput = modelMaxContext - desiredOutputTokens - toolsTokenEstimate - 256;
+
+    // we need to estimate the total input tokens based on the messages and tool calls, and truncate if necessary
+
+    // Build input text for an initial token estimate using ALL messages
+    const fullInputText = aiMessages
+      .map((m) => {
+        let text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+        if ((m as any).tool_calls) { text += JSON.stringify((m as any).tool_calls); }
+        return text;
+      })
+      .join('\n');
+
+    const initialInputTokens = Math.ceil(fullInputText.length / 4);
+
+    //first we need to remove unnecessary text: '<userRequest>Try Again</userRequest>'
+    let cleanedMessages = aiMessages.map((m) => {
+      if (typeof m.content === 'string') {
+        const cleanedContent = m.content.replace('<userRequest>\nTry Again\n</userRequest>\n', '').trim();
+        return { ...m, content: cleanedContent };
+      }
+      return m;
+    }).filter((m) => {
+      if (typeof m.content === 'string') {
+        return m.content.trim().length > 0;
+      }
+      return true;
+      });
+
+
+    // Only truncate when the combined estimate truly exceeds the available context
+    let truncatedMessages = cleanedMessages;
+    if (initialInputTokens > reservedForInput) {
+      const maxInputTokens = reservedForInput;
+      truncatedMessages = this.truncateMessagesToFit(cleanedMessages, maxInputTokens);
+      if (truncatedMessages.length < cleanedMessages.length) {
+        this.logger.warn(`Truncated conversation from ${cleanedMessages.length} to ${truncatedMessages.length} messages to fit context limit`);
+      }
+    }
+    return truncatedMessages;
+  }
+
   /**
    * Provide token count estimation
    */
@@ -352,6 +323,10 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
   // Private helper methods
 
   protected mapRole(role: vscode.LanguageModelChatMessageRole): string {
+    if (role as Number === 3) { // vscode.LanguageModelChatMessageRole.System
+      return 'system';
+    }
+
     if (role === vscode.LanguageModelChatMessageRole.User) {
       return 'user';
     }
@@ -448,7 +423,7 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
     return Math.max(64, safeMaxOutputTokens);
   }
 
-  private buildToolsConfig(options: vscode.ProvideLanguageModelChatResponseOptions): Record<string, unknown>[] | undefined {
+  private buildToolsConfig(options: vscode.ProvideLanguageModelChatResponseOptions): ToolDefinition[] | undefined {
     if (!this.config.enableToolCalling || !options.tools || options.tools.length === 0) {
       return undefined;
     }
@@ -467,10 +442,93 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
       }
 
       return {
-        type: 'function',
-        function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+        name: tool.name, 
+        description: tool.description, 
+        parameters: tool.inputSchema as object
       };
     });
+  }
+
+
+  /*
+    Convert vscode Messages to internal AI Messages
+  */
+private toAiMessages(messages: readonly vscode.LanguageModelChatMessage[]): Message[] {
+    const aiMessages: Message[] = [];
+
+    for (const msg of messages) {
+      const role = this.mapRole(msg.role);
+      let currentContent = '';
+      let currentToolCalls: ToolPart[] = [];
+
+      for (const part of msg.content) {
+        if (part instanceof vscode.LanguageModelTextPart) {
+          currentContent += part.value;
+        } else if (part instanceof vscode.LanguageModelToolCallPart) {
+          currentToolCalls.push({
+            type:'tool',
+            tool_request:{
+              id: part.callId,
+              name: part.name,
+              arguments: JSON.stringify(part.input),
+            }
+          });
+        } else if (part instanceof vscode.LanguageModelToolResultPart) {
+          // Find the corresponding tool call by ID and update it with the response
+          const matchingToolPart = currentToolCalls.find(
+            toolPart => toolPart.tool_request.id === part.callId
+          );
+          
+          if (matchingToolPart) {
+            // Update the tool part with the response
+            matchingToolPart.tool_response = typeof part.content === 'string' 
+              ? part.content 
+              : JSON.stringify(part.content);
+          } else {
+            // If no matching tool call found in current accumulation, 
+            // this is a standalone tool result (from a previous message)
+            if (currentContent || currentToolCalls.length > 0) {
+              aiMessages.push({ role, content: currentToolCalls.length > 0 ? currentToolCalls : currentContent });
+              currentContent = '';
+              currentToolCalls = [];
+            }
+            // Create a separate tool message
+            aiMessages.push({
+              role: 'tool',
+              content: typeof part.content === 'string' ? part.content : JSON.stringify(part.content),
+            });
+          }
+        }
+      }
+
+      if (currentContent || currentToolCalls.length > 0) {
+        aiMessages.push({ role, content: currentToolCalls.length > 0 ? currentToolCalls : currentContent });
+      }
+    }
+
+    return aiMessages;
+  }
+
+
+  private toAIRequest(
+    model: vscode.LanguageModelChatInformation,
+    messages: Message[],
+    options: vscode.ProvideLanguageModelChatResponseOptions,
+  ): AIRequest {
+    
+
+    const requestOptions: RequestOptions = {
+      model: model.id,
+      temperature: options.modelOptions?.temperature,
+      maxTokens: options.modelOptions?.maxTokens,
+      tools: this.buildToolsConfig(options),
+      providerOptions: options.modelOptions?.extensionParameters,
+    };
+
+    return {
+      messages: messages,
+      options: requestOptions,
+    };
   }
 
 

@@ -2,7 +2,7 @@
   "name": "private-model-provider",
   "displayName": "MFD: Private Model Provider",
   "description": "VS Code extension to connect to private or local LLM inference servers (Ollama, llama.cpp, LocalAI, LM Studio, vLLM) via OpenAI API compatible endpoints.",
-  "version": "1.2.12",
+  "version": "1.2.14",
   "publisher": "mfd",
   "icon": "assets/private-model-provider.png",
   "private": true,
@@ -386,6 +386,10 @@
         "order": 4
       }
     }
+  },
+  "dependencies": {
+    "marked": "^12.0.0",
+    "highlight.js": "^11.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",

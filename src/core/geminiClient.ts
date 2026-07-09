@@ -44,11 +44,13 @@ import * as gemini from './geminiTypes';
 import {
   OpenAIChatCompletionRequest,
   OpenAIChatCompletionResponse,
-  OpenAIModelsResponse,
+  AIModelsResponse,
   OpenAITool,
 } from '../types';
 import { IllmClient, StreamChunk, StreamingToolCall, IllmClientConfig } from './interfaces';
 import { SecretManager } from '../secretManager';
+import { AIRequest, AIResponse } from './chatMessages';
+import { GeminiConverter, GeminiResponse } from './GeminiAPI';
 
 // Gemini-related types are defined inside geminiClient.ts
 
@@ -265,6 +267,7 @@ interface ParsedChunk {
 export class GeminiClient implements IllmClient {
   private config: IllmClientConfig;
   private retryConfig: RetryConfig;
+  private converter = new GeminiConverter();
 
   /** Base URL for the Gemini API. */
   private readonly baseUrl = 'https://generativelanguage.googleapis.com/v1';
@@ -298,7 +301,7 @@ export class GeminiClient implements IllmClient {
    * old generateContent API.  Models are filtered to only those that support
    * `generateContent` and the response is mapped to the OpenAI shape.
    */
-  public async fetchModels(): Promise<OpenAIModelsResponse> {
+  public async fetchModels(): Promise<AIModelsResponse> {
     const url = `${this.baseUrl}/models`;
 
     try {
@@ -365,9 +368,12 @@ export class GeminiClient implements IllmClient {
    * return the full response translated into OpenAI shape.
    */
   public async completeChat(
-    request: OpenAIChatCompletionRequest
-  ): Promise<OpenAIChatCompletionResponse> {
-    const body = this.buildInteractionsCreateRequest(request, false);
+    request: AIRequest
+  ): Promise<AIResponse> {
+    //const body = this.buildInteractionsCreateRequest(request, false);
+
+    const geminiRequest = this.converter.toProviderRequest(request);
+
 
     try {
       const response = await this.fetchWithRetry(
@@ -375,7 +381,7 @@ export class GeminiClient implements IllmClient {
         {
           method: 'POST',
           headers: await this.getHeaders(),
-          body: JSON.stringify(body),
+          body: JSON.stringify(geminiRequest),
         },
         'Complete chat (Gemini Interactions)'
       );
@@ -389,9 +395,11 @@ export class GeminiClient implements IllmClient {
         );
       }
 
-      const interaction: GeminiInteraction = await response.json();
+      const interaction: GeminiResponse = await response.json();
 
-      return this.translateNonStreamingResponse(interaction, request.model);
+      const aiResponse = this.converter.fromProviderResponse(interaction);
+
+      return aiResponse;
     } catch (error) {
       if (error instanceof GeminiError) throw error;
       if (error instanceof Error) {
@@ -421,10 +429,11 @@ export class GeminiClient implements IllmClient {
    * are agnostic to which backend is in use.
    */
     public async *streamChatCompletion(
-    request: OpenAIChatCompletionRequest,
+    request: AIRequest,
     abortSignal?: AbortSignal
   ) {
-    const body = this.buildInteractionsCreateRequest(request, true);
+    
+    const geminiRequest = this.converter.toProviderRequest(request);
 
   
     try {
@@ -437,7 +446,7 @@ export class GeminiClient implements IllmClient {
         {
           method: 'POST',
           headers: await this.getHeaders(),
-          body: JSON.stringify(body),
+          body: JSON.stringify(geminiRequest),
           signal: controller.signal,
         },
         `Stream chat completion (Gemini Interactions)`,
@@ -473,14 +482,14 @@ export class GeminiClient implements IllmClient {
             try {
               const jsonString = line.slice('data:'.length).trim();
               const parsed: ParsedChunk = JSON.parse(jsonString);
-              yield this.translateStreamingChunk(currentEventType, parsed, request.model);
+              yield this.translateStreamingChunk(currentEventType, parsed, geminiRequest.model);
             } catch (e) {
               // Skip malformed chunks.
             }
           } else if (line.startsWith('{')) {
             try {
               const parsed: ParsedChunk = JSON.parse(line);
-              yield this.translateStreamingChunk(currentEventType, parsed, request.model);
+              yield this.translateStreamingChunk(currentEventType, parsed, geminiRequest.model);
             } catch (e) {
               // Skip malformed chunks.
             }
@@ -497,14 +506,14 @@ export class GeminiClient implements IllmClient {
           try {
             const jsonString = line.slice('data:'.length).trim();
             const parsed: ParsedChunk = JSON.parse(jsonString);
-            yield this.translateStreamingChunk(currentEventType, parsed, request.model);
+            yield this.translateStreamingChunk(currentEventType, parsed, geminiRequest.model);
           } catch (e) {
             // Skip malformed chunks.
           }
         } else if (line.startsWith('{')) {
           try {
             const parsed: ParsedChunk = JSON.parse(line);
-            yield this.translateStreamingChunk(currentEventType, parsed, request.model);
+            yield this.translateStreamingChunk(currentEventType, parsed, geminiRequest.model);
           } catch (e) {
             // Skip malformed chunks.
           }

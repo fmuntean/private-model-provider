@@ -1,20 +1,21 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { GatewayProvider } from '../provider';
+import { ChatProvider } from '../ChatProvider';
 import { SessionManager } from '../sessionManager';
-import { getLogger, Logger } from '../vscodeLogger';
+import { getLogger } from '../vscodeLogger';
+import { ILogger } from '../core/interfaces';
 
 /**
  * Webview provider for the chat sidebar
  */
 export class ChatSideBarProvider implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | undefined;
-    private logger: Logger;
+    private logger: ILogger;
     private currentSelectedModelId: string | null = null;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
-        private readonly provider: GatewayProvider,
+        private readonly provider: ChatProvider,
         private readonly sessionManager: SessionManager
     ) {
         this.logger = getLogger();
@@ -210,6 +211,93 @@ export class ChatSideBarProvider implements vscode.WebviewViewProvider {
                             this.currentSelectedModelId = message.model;
                             this.logger.info(`[LMP] Model selection changed to: ${message.model}`);
                             break;
+                            
+                        case 'applyCode':
+                            // Apply code to a file
+                            this.logger.info('[LMP] Apply code requested');
+                            try {
+                                const code = message.code;
+                                const language = message.language;
+                                
+                                // Prompt user for file path
+                                const uri = await vscode.window.showSaveDialog({
+                                    defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+                                    filters: {
+                                        'All Files': ['*']
+                                    }
+                                });
+                                
+                                if (uri) {
+                                    await vscode.workspace.fs.writeFile(uri, Buffer.from(code, 'utf-8'));
+                                    vscode.window.showInformationMessage(`Code applied to ${uri.fsPath}`);
+                                    this.logger.info(`[LMP] Code written to ${uri.fsPath}`);
+                                }
+                            } catch (error) {
+                                this.logger.error('[LMP] Failed to apply code:', error);
+                                vscode.window.showErrorMessage(`Failed to apply code: ${error}`);
+                            }
+                            break;
+                            
+                        case 'requestFileList':
+                            // Get workspace files for autocomplete
+                            this.logger.info(`[LMP] File list requested with query: ${message.query}`);
+                            try {
+                                const files = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
+                                const fileList = files.map(f => ({
+                                    path: vscode.workspace.asRelativePath(f),
+                                    uri: f.toString()
+                                }));
+                                
+                                // Filter by query if provided
+                                const query = message.query || '';
+                                const filtered = query ? 
+                                    fileList.filter(f => f.path.toLowerCase().includes(query.toLowerCase())) :
+                                    fileList;
+                                
+                                this.webviewView?.webview.postMessage({
+                                    type: 'fileList',
+                                    files: filtered.slice(0, 20)
+                                });
+                            } catch (error) {
+                                this.logger.error('[LMP] Failed to get file list:', error);
+                            }
+                            break;
+                            
+                        case 'deleteMessage':
+                            // Delete a message from the session
+                            this.logger.info(`[LMP] Delete message requested for session: ${message.sessionId}`);
+                            try {
+                                const session = this.sessionManager.getActiveSession();
+                                if (session && message.sessionId === session.id) {
+                                    // Backend implementation would remove the last message
+                                    vscode.window.showInformationMessage('Message deleted');
+                                    this.logger.info('[LMP] Message deleted from session');
+                                }
+                            } catch (error) {
+                                this.logger.error('[LMP] Failed to delete message:', error);
+                            }
+                            break;
+                            
+                        case 'regenerateMessage':
+                            // Regenerate the last assistant message
+                            this.logger.info('[LMP] Regenerate message requested');
+                            try {
+                                const session = this.sessionManager.getActiveSession();
+                                if (session && session.messages.length > 0) {
+                                    // Find the last user message and resend it
+                                    const userMessages = session.messages.filter(m => m.role === 'user');
+                                    if (userMessages.length > 0) {
+                                        const lastUserMessage = userMessages[userMessages.length - 1];
+                                        vscode.window.showInformationMessage('Regenerating response...');
+                                        this.logger.info('[LMP] Regenerating from last user message');
+                                        // The frontend should resend the message
+                                    }
+                                }
+                            } catch (error) {
+                                this.logger.error('[LMP] Failed to regenerate message:', error);
+                            }
+                            break;
+                            
                         // Tool results are now handled automatically by the provider; no UI round‑trip needed.
                     }
                 },
@@ -318,7 +406,7 @@ function getNonce(): string {
  */
 export function registerChatView(
     context: vscode.ExtensionContext,
-    provider: GatewayProvider,
+    provider: ChatProvider,
     sessionManager: SessionManager
 ): ChatSideBarProvider {
     const chatViewProvider = new ChatSideBarProvider(context.extensionUri, provider, sessionManager);

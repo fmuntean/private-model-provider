@@ -69,10 +69,14 @@ export interface ILogger {
 // ---------------------------------------------------------------------------
 
 import {
-  OpenAIChatCompletionRequest,
-  OpenAIChatCompletionResponse,
-  OpenAIModelsResponse,
+  AIModelsResponse,
 } from '../types';
+
+import {
+   AIRequest,
+  AIResponse,
+} from './chatMessages';
+
 
 /**
  * Configuration for an LLM client. Contains only the fields actually consumed
@@ -131,7 +135,7 @@ export interface IllmClient {
   RetryDelayMs(): number;
 
   /** Fetch available models from the provider. */
-  fetchModels(): Promise<OpenAIModelsResponse>;
+  fetchModels(): Promise<AIModelsResponse>;
 
   /**
    * Fetch models from LM Studio's /api/v1/models endpoint.
@@ -142,7 +146,7 @@ export interface IllmClient {
   /**
    * Send a non‑streaming chat completion request.
    */
-  completeChat(request: OpenAIChatCompletionRequest): Promise<OpenAIChatCompletionResponse>;
+  completeChat(request: AIRequest): Promise<AIResponse>;
 
   /**
    * Stream chat completions via SSE.
@@ -151,7 +155,7 @@ export interface IllmClient {
    * @param abortSignal - Optional signal to cancel the stream.
    */
   streamChatCompletion(
-    request: OpenAIChatCompletionRequest,
+    request: AIRequest,
     abortSignal?: AbortSignal
   ): AsyncGenerator<StreamChunk, void, unknown>;
 }
