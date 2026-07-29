@@ -377,6 +377,44 @@ export class LlmClient implements IllmClient {
     return obj.reasoning_content || obj.reasoning || obj.thinking || undefined;
   }
 
+  /** Parse XML tool call content from model responses */
+  private parseXMLToolCall(content: string): { function_name?: string; arguments?: string | null } {
+    // Match opening tag containing function name
+    const funcMatch = content.match(/<function\sname=(["'])([^"']*)(["'])>/);
+    if (funcMatch) {
+      const argumentsContent = content.match(/<arguments>(.*?)<\/arguments>/s)?.[1];
+      return {
+        function_name: funcMatch[2],
+        arguments: this.stripNestedTags(argumentsContent || '') || null,
+      };
+    }
+
+    // Fallback to legacy format
+    const lcMatch = content.match(/<function_call\sname=(["'])([^"']*)(["'])\sarguments=(["'])(.*?)(["'])/);
+    if (lcMatch) {
+      return {
+        function_name: lcMatch[2],
+        arguments: this.stripNestedTags(lcMatch[5] || ''),
+      };
+    }
+
+    // Try to extract nested XML as raw string for future debugging
+    const argsContent = content.match(/<arguments>([\s\S]*?)<\/arguments>/);
+    //this.logger.debug(`Extracted tool call from XML:\n${content}`);
+    return { function_name: 'unknown', arguments: this.stripNestedTags(argsContent ? argsContent[1] : '') || null };
+  }
+
+  /** Strip nested HTML/XML tags from content, returning plain text only */
+  private stripNestedTags(content: string): string {
+    // Use regex to find and remove all opening XML/HTML tags recursively
+    const tagRegex = /<[^\/]?[^>]*(.*?)<\/[^\/]?\S+>/gs;
+    let result = content;
+    while (result !== '') {
+      result = result.replace(tagRegex, ''); // Replace matched text with empty string
+    }
+    return result;
+  }
+
   /** Process delta format from streaming response */
   private processDeltaFormat(
     parsed: ParsedChunk,
@@ -384,17 +422,20 @@ export class LlmClient implements IllmClient {
   ): { content: string; reasoning_content?: string; finishedToolCalls: StreamingToolCall[] } {
     const delta = parsed.delta!;
     const finishedToolCalls: StreamingToolCall[] = [];
+    const deltaContent = delta.content || ''; // Define deltaContent here
 
     // Handle streamed tool_calls
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
-        this.processToolCallDelta(tc, state);
+        const argsContent = deltaContent.match(/<arguments>(.*?)<\/arguments>/s)?.[1]; // Use deltaContent
+        this.processToolCallDelta({ id: tc.id, name: tc.function?.name || '', arguments: this.stripNestedTags(argsContent || '') }, state);
       }
     }
 
     // Handle legacy function_call format
     if (delta.function_call) {
-      this.processLegacyFunctionCall(delta.function_call, parsed.id || '', state);
+      const lcMatch = deltaContent.match(/<function_call\sname=(["'])([^"']*)(["'])\sarguments=(["'])(.*?)(["'])/); // Use deltaContent
+      this.processLegacyFunctionCall({ name: delta.function_call.name || '', arguments: this.stripNestedTags(lcMatch?.[5] || '') }, parsed.id || '', state);
     }
 
     // Check if tool calls are complete
@@ -465,12 +506,12 @@ export class LlmClient implements IllmClient {
 
   /** Process a single SSE line and return yield data if applicable, including usage. */
   private processSSELine(
-    line: string,
+    line: string | null,
     state: ToolCallState
   ): StreamChunk | null {
-    const trimmed = line.trim();
+    const trimmed = line ? line.trim() : '';
 
-    if (trimmed === '' || trimmed === 'data: [DONE]') {
+    if (!trimmed || trimmed === '' || trimmed === 'data: [DONE]') {
       return null;
     }
 

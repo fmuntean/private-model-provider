@@ -91,8 +91,14 @@ export class OpenAIConverter implements APIConverter<OpenAIRequest, OpenAIRespon
         }
 
         // OpenAI handles base64 directly inline via data URIs or standard URLs
-        const data = (part as ImagePart).data
-        const url = data.startsWith('http') ? data : `data:${(part as ImagePart).mimeType};base64,${data}`;
+        const imagePart = part as ImagePart;
+        const data = imagePart.data;
+        // Guard against undefined data
+        if (!data) {
+          console.warn('[OpenAIConverter] Image part missing data, skipping:', part);
+          return { type: 'text' as const, text: '[Image data missing]' };
+        }
+        const url = data.startsWith('http') ? data : `data:${imagePart.mimeType};base64,${data}`;
 
         return {
           type: 'image_url' as const,

@@ -11,8 +11,7 @@ import { BaseProvider } from './core/BaseProvider';
 import { GatewayConfig, ModelInfo } from './types';
 import { IllmClient } from './core/interfaces';
 import { ILogger } from './core/interfaces';
-import { AIRequest, Message, MessageContent, RequestOptions, ToolCall, ToolDefinition, ToolPart } from './core/chatMessages';
-import { LanguageModelChatMessageRole } from 'vscode';
+import { AIRequest, Message, RequestOptions, ToolDefinition } from './core/chatMessages';
 
 /**
  * CopilotProvider implements the VS Code LanguageModelChatProvider interface.
@@ -164,8 +163,38 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
     this.logger.debug(`Tool mode: ${options.toolMode}, Tools: ${options.tools?.length || 0}`);
     this.logger.debug(`Message count: ${messages.length}`);
 
+
+    const cleanedMessages = messages.map(msg => {
+    if (msg.role === vscode.LanguageModelChatMessageRole.Assistant) {
+      const thinkingRegex = /<THINKING>[\s\S]*?<\/THINKING>/gi;
+      let cleanText = '';
+
+      // Case 1: If content is passed natively as an array of structured parts
+      if (Array.isArray(msg.content)) {
+        cleanText = msg.content
+          .map(part => {
+            // Only run replacement if it's a TextPart containing value text
+            if ('value' in part && typeof part.value === 'string') {
+              return part.value.replace(thinkingRegex, '');
+            }
+            // Fallback to empty string for binary/data parts
+            return '';
+          }).join('');
+        } 
+        // Case 2: If content falls back to a primitive string string configuration
+        else if (typeof msg.content === 'string') {
+            cleanText = (msg.content as string).replace(thinkingRegex, '');
+        }
+
+        // Re-create the assistant message using the completely sanitized text
+        return vscode.LanguageModelChatMessage.Assistant(cleanText.trim());
+      }
+      return msg;
+    });
+
+
     // Convert messages to OpenAI format
-    let aiMessages = this.toAiMessages(messages);
+    let aiMessages = this.toAiMessages(cleanedMessages);
 
     this.logger.debug(`Converted to ${aiMessages.length} AI messages`);
 
@@ -182,6 +211,7 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
     const debugRequest = JSON.stringify(request, null, 2);
     this.logger.debug(debugRequest.length > 2000 ? `Request (truncated): ${debugRequest.substring(0, 2000)}...` : `Request: ${debugRequest}`);
 
+    let thinking = false;
     try {
       let totalContent = '';
       let totalToolCalls = 0;
@@ -196,14 +226,30 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
         }
 
         if (chunk.content) {
-          this.logger.debug(`CHUNK: ${chunk.content}`);
+          if (thinking){
+            // A clean trailing gap closes out any open lists/code blocks before ending the HTML block
+            progress.report(new vscode.LanguageModelTextPart("\n\n</THINKING>\n\n"));
+            thinking = false;
+          }
+          // Check if content is XML and log it separately for debugging
+          if (chunk.content.trim().startsWith('<function')) {
+            this.logger.error(`[DEBUG] Received raw XML chunk (not SSE format): ${chunk.content.substring(0, 500)}...`);
+          }
+
           totalContent += chunk.content;
           progress.report(new vscode.LanguageModelTextPart(chunk.content));
         }
 
         if (chunk.reasoning_content) {
+          if (!thinking){
+            // Mandate double newlines so nested blocks have room to compile
+            progress.report(new vscode.LanguageModelTextPart("\n\n<THINKING>\n\n"));
+            thinking = true;
+          }
+          let reasoning_content = chunk.reasoning_content;
           this.logger.debug(`THINK: ${chunk.reasoning_content}`);
-          progress.report(new vscode.MarkdownString(chunk.reasoning_content));
+          // Push to the dedicated UI thinking block container
+          progress.report(new vscode.LanguageModelTextPart(reasoning_content));
         }
 
         if (chunk.finished_tool_calls && chunk.finished_tool_calls.length > 0) {
@@ -237,15 +283,22 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
         }
       
 
-        this.logger.info(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
         if (chunk.usage) {
           progress.report(new vscode.MarkdownString(`Tokens: Input ${chunk.usage.prompt_tokens}, Output ${chunk.usage.completion_tokens}, Total ${chunk.usage.total_tokens}`));
         }
       }
+
+      this.logger.info(`Completed chat request, received ${totalContent.length} characters, ${totalToolCalls} tool calls`);
+        
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(` Chat request failed: ${errorMessage}`);
       throw error;
+    }finally{
+      if (thinking){
+            progress.report(new vscode.LanguageModelTextPart("  \n</THINKING>\n\n"))
+            thinking = false;
+          }
     }
   }
 
@@ -450,64 +503,72 @@ export class CopilotProvider extends BaseProvider implements vscode.LanguageMode
   }
 
 
-  /*
-    Convert vscode Messages to internal AI Messages
-  */
-private toAiMessages(messages: readonly vscode.LanguageModelChatMessage[]): Message[] {
-    const aiMessages: Message[] = [];
+private toAiMessages(messages: readonly vscode.LanguageModelChatMessage[]): any[] {
+  const aiMessages: any[] = [];
 
-    for (const msg of messages) {
-      const role = this.mapRole(msg.role);
-      let currentContent = '';
-      let currentToolCalls: ToolPart[] = [];
-
-      for (const part of msg.content) {
-        if (part instanceof vscode.LanguageModelTextPart) {
-          currentContent += part.value;
-        } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          currentToolCalls.push({
-            type:'tool',
-            tool_request:{
-              id: part.callId,
-              name: part.name,
-              arguments: JSON.stringify(part.input),
-            }
-          });
-        } else if (part instanceof vscode.LanguageModelToolResultPart) {
-          // Find the corresponding tool call by ID and update it with the response
-          const matchingToolPart = currentToolCalls.find(
-            toolPart => toolPart.tool_request.id === part.callId
-          );
-          
-          if (matchingToolPart) {
-            // Update the tool part with the response
-            matchingToolPart.tool_response = typeof part.content === 'string' 
-              ? part.content 
-              : JSON.stringify(part.content);
-          } else {
-            // If no matching tool call found in current accumulation, 
-            // this is a standalone tool result (from a previous message)
-            if (currentContent || currentToolCalls.length > 0) {
-              aiMessages.push({ role, content: currentToolCalls.length > 0 ? currentToolCalls : currentContent });
-              currentContent = '';
-              currentToolCalls = [];
-            }
-            // Create a separate tool message
-            aiMessages.push({
-              role: 'tool',
-              content: typeof part.content === 'string' ? part.content : JSON.stringify(part.content),
-            });
-          }
+  for (const msg of messages) {
+    const role = this.mapRole(msg.role);
+    
+    // 1. Handle Tool Result Messages (Directly mapping 'tool' roles)
+    // Checking for tool results first ensures tool response flows are never bound back to standard roles
+    const toolResults = msg.content.filter(part => part instanceof vscode.LanguageModelToolResultPart);
+    if (toolResults.length > 0) {
+      for (const part of toolResults) {
+        let resultString = '';
+        if (typeof part.content === 'string') {
+          resultString = part.content;
+        } else if (part.content && typeof part.content === 'object' && 'value' in part.content) {
+          resultString = (part.content as any).value;
+        } else {
+          resultString = JSON.stringify(part.content ?? '');
         }
-      }
 
-      if (currentContent || currentToolCalls.length > 0) {
-        aiMessages.push({ role, content: currentToolCalls.length > 0 ? currentToolCalls : currentContent });
+        aiMessages.push({
+          role: 'tool',
+          tool_call_id: part.callId,
+          content: resultString
+        });
+      }
+      continue; // Skip the rest of this loop iteration since it was processed cleanly as tool-specific roles
+    }
+
+    // 2. Coalesce Text Content and Tool Calls into a Single, Compliant Message Object
+    let textContent = '';
+    const toolCalls: any[] = [];
+
+    for (const part of msg.content) {
+      if (part instanceof vscode.LanguageModelTextPart) {
+        textContent += part.value;
+      } else if (part instanceof vscode.LanguageModelToolCallPart) {
+        toolCalls.push({
+          id: part.callId,
+          type: 'function',
+          function: {
+            name: part.name,
+            arguments: typeof part.input === 'string' ? part.input : JSON.stringify(part.input),
+          }
+        });
       }
     }
 
-    return aiMessages;
+    // 3. Assemble and Push openAI-Compliant Structures
+    if (toolCalls.length > 0) {
+      // Vital: If tools exist, content MUST explicitly be null or string, and tied to an assistant role 
+      aiMessages.push({
+        role: 'assistant',
+        content: textContent || "", 
+        tool_calls: toolCalls
+      });
+    } else if (textContent) {
+      aiMessages.push({
+        role: role,
+        content: textContent
+      });
+    }
   }
+
+  return aiMessages;
+}
 
 
   private toAIRequest(

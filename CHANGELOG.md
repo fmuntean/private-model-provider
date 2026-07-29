@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.14
+
+### New Features
+- Added GeminiClient and LmStudioClient support.
+- Added UI assets and session management implementation.
+- Implemented US-022 Test Connection command registration.
+
+### Improvements
+- Refactored Client and Provider to use internal interfaces.
+- Split provider for re-usability (CopilotProvider and ChatProvider).
+- Renamed extension to Private Model Provider.
+- Updated extension icon.
+- Updated project configuration and dependencies.
+- Updated prompt templates and core extension functionality.
+- Removed system prompt override feature.
+
+### Fixes
+- Improved handling of API Keys.
+- Made SecretManager a singleton.
+- Fixed API key retention when updating config.
+- Fixed packaging and auto-increment patch version upon vsix generation.
+- Fixed model dropdown refresh and test connection cache handling.
+- Added jsnol ai-logs to the workspace.
+
+
 ## 1.2.3
 
 ### New Features
